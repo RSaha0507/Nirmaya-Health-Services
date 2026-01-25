@@ -33,8 +33,8 @@ app.add_middleware(
 # MongoDB Connection
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://nirmaya_admin:nirmaya%40admin12345@cluster0.uev8tun.mongodb.net/nirmaya_health?retryWrites=true&w=majority&appName=Cluster0")
 JWT_SECRET = os.environ.get("JWT_SECRET", "nirmaya_health_secret_key_2025_secure")
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_12345")
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client.nirmaya_health
@@ -1722,7 +1722,7 @@ async def chat_with_ai(message: str = Form(...), history: str = Form("[]")):
             response = await client.post(
                 "https://integrations.emergentagent.com/api/llm/chat",
                 headers={
-                    "Authorization": f"Bearer {EMERGENT_LLM_KEY}",
+                    "Authorization": f"Bearer {GEMINI_API_KEY}",
                     "Content-Type": "application/json"
                 },
                 json={

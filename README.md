@@ -1,147 +1,639 @@
-# Nirmaya Health Services - Smart Hospital Management System
+# 🏥 Nirmaya Health Services
 
-![Nirmaya Health Logo](/public/logo.png)
+<div align="center">
 
-**Live Demo:** [nirmaya-health-services](https://nirmayahealthservices.netlify.app/)
+![Nirmaya Health Banner](https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=1200&h=300&fit=crop)
+
+### Smart Hospital Management System
+
+**A modern, comprehensive full-stack healthcare platform built with React & FastAPI**
+
+[![Live Demo](https://img.shields.io/badge/demo-live-success?style=for-the-badge)](https://nirmayahealthservices.netlify.app/)
+[![React](https://img.shields.io/badge/React-19.1.1-61dafb?style=for-the-badge&logo=react)](https://reactjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
+
+[Live Demo](https://nirmayahealthservices.netlify.app/) • [Report Bug](https://github.com/RSaha0507/Nirmaya-Health-Services/issues) • [Request Feature](https://github.com/RSaha0507/Nirmaya-Health-Services/issues)
+
+</div>
 
 ---
 
-## 🏥 Introduction
+## 📋 Table of Contents
 
-Nirmaya Health is a modern, comprehensive, and user-centric web application designed to streamline hospital management and enhance the patient experience. This full-stack project leverages the power of React for a dynamic frontend and Google's Firebase for a robust backend, providing a seamless interface for patients, doctors, and administrators. The integration of Google's Gemini API for an agentic AI chatbot elevates the user experience, offering intelligent, interactive assistance for navigating the hospital's services.
+- [Overview](#-overview)
+- [Key Features](#-key-features)
+- [Tech Stack](#-tech-stack)
+- [Architecture](#-architecture)
+- [Getting Started](#-getting-started)
+- [Project Structure](#-project-structure)
+- [API Documentation](#-api-documentation)
+- [User Roles](#-user-roles)
+- [Screenshots](#-screenshots)
+- [Deployment](#-deployment)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Contact](#-contact)
 
-This project was built from the ground up to be a scalable, real-world solution for modern healthcare providers.
+---
+
+## 🌟 Overview
+
+**Nirmaya Health Services** is a production-ready, enterprise-grade hospital management system that revolutionizes healthcare delivery through modern technology. Built with cutting-edge frameworks and designed for scalability, this platform seamlessly connects patients, doctors, and administrators in a unified ecosystem.
+
+### Why Nirmaya?
+
+- 🚀 **Modern Stack** - Built with React 19 and FastAPI for blazing-fast performance
+- 🔐 **Enterprise Security** - JWT authentication, bcrypt hashing, and role-based access control
+- 💬 **Real-time Communication** - WebSocket-powered notifications and messaging
+- 💳 **Integrated Payments** - Stripe payment gateway for seamless transactions
+- 🤖 **AI-Powered** - Google Gemini API integration for intelligent chatbot assistance
+- 📱 **Responsive Design** - Mobile-first approach with TailwindCSS
+- ⚡ **High Performance** - Async operations with Motor and FastAPI
+- 🏥 **Comprehensive** - 15+ medical departments with specialized features
 
 ---
 
 ## ✨ Key Features
 
-The platform is divided into three distinct user experiences with a rich set of features for each:
+### For Patients 👥
 
-### 👤 **Patient & Public Portal**
-* **Dynamic Homepage:** Features an automated image slider with engaging captions.
-* **Detailed Department Pages:** Individual, detailed pages for over 15 medical departments, each with descriptions, specialties, and lists of conditions treated.
-* **Doctor Listings:** A comprehensive page to view all doctors.
-* **Secure User Authentication:**
-    * User Sign-Up and Login using Firebase Authentication.
-    * Secure password reset functionality via email.
-    * Customizable user dashboard to view bookings and manage account details.
-* **Interactive Appointment Booking:**
-    * A multi-step booking form that dynamically filters doctors by department and shows real-time available time slots.
-* **AI Chatbot:**
-    * Powered by the **Google Gemini API** to provide helpful, conversational answers about the hospital's services.
-* **Responsive Design:** Fully functional and visually appealing on all devices, from mobile phones to desktops.
+- **Smart Appointment Booking**
+  - Multi-step intuitive booking flow
+  - Real-time doctor availability
+  - Department and specialty filtering
+  - Online consultation options
 
-### 👨‍⚕️ **Doctor's Portal**
-* **Secure Doctor Login:** Doctors have their own credentials, managed by the admin.
-* **Appointment Dashboard:** Upon logging in, doctors are taken to a dedicated portal showing a list of their scheduled appointments, grouped by date.
-* **Appointment Management:** Doctors have the ability to view patient details for each appointment and cancel appointments if necessary.
+- **Personalized Dashboard**
+  - View upcoming and past appointments
+  - Access medical records and prescriptions
+  - Download reports and test results
+  - Track health checkup packages
 
-### ⚙️ **Admin Dashboard**
-* **Full CRUD Functionality:** The admin has complete control over the hospital's core data.
-* **Doctor Management:**
-    * Add, edit, and delete doctor profiles (name, specialty, department, time slots, etc.).
-    * **Note on Doctor Credentials:** For security, after an admin creates a doctor's profile in the dashboard, they must **manually create the doctor's login account** (email and password) in the Firebase Authentication console.
-* **User Management:** View a list of all registered users and delete user accounts.
-* **Appointment Management:**
-    * View a comprehensive list of all appointments booked across the hospital.
-    * Edit appointment details, such as changing the doctor or time.
-    * Cancel any patient's appointment.
+- **AI Health Assistant**
+  - 24/7 chatbot powered by Google Gemini
+  - Instant answers to health queries
+  - Department and service recommendations
+
+- **Emergency Services**
+  - Quick ambulance booking
+  - Real-time ambulance tracking
+  - Emergency contact integration
+
+- **Health Packages**
+  - Comprehensive health checkup packages
+  - Discounted pricing
+  - Easy online booking and payment
+
+### For Doctors 👨‍⚕️
+
+- **Professional Portal**
+  - Dedicated dashboard for appointment management
+  - Patient medical history access
+  - Real-time schedule updates
+  - Digital prescription generation
+
+- **Appointment Management**
+  - View daily/weekly schedules
+  - Patient details and medical records
+  - Appointment cancellation and rescheduling
+  - Consultation notes and documentation
+
+- **Communication Tools**
+  - Secure messaging with patients
+  - Real-time notifications
+  - Video consultation integration
+
+### For Administrators ⚙️
+
+- **Complete Control Panel**
+  - Full CRUD operations for all entities
+  - User and doctor management
+  - Appointment oversight and analytics
+
+- **Resource Management**
+  - Medical equipment inventory tracking
+  - Bed availability management
+  - Department and staff scheduling
+  - Ambulance fleet management
+
+- **Analytics & Reporting**
+  - Visual dashboards with Recharts
+  - Revenue tracking and statistics
+  - Patient demographics and trends
+  - System performance metrics
+
+- **System Configuration**
+  - Payment gateway settings
+  - Notification preferences
+  - Role and permission management
+  - Database backups and maintenance
 
 ---
 
 ## 🛠️ Tech Stack
 
-This project was built using a modern, robust tech stack:
+### Frontend
 
-* **Frontend:** React.js
-* **Backend & Database:** Google Firebase (Firestore & Firebase Authentication)
-* **Styling:** Tailwind CSS
-* **AI & Machine Learning:** Google Gemini API (for the agentic chatbot)
-* **Icons:** Lucide React
-* **Deployment:** Netlify
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **React** | 19.1.1 | UI Framework |
+| **TailwindCSS** | 3.4.1 | Styling |
+| **Lucide React** | 0.539.0 | Icons |
+| **Recharts** | 3.6.0 | Data Visualization |
+| **Firebase** | 12.1.0 | Authentication & Storage |
+| **Date-fns** | 4.1.0 | Date Manipulation |
+
+### Backend
+
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **FastAPI** | 0.115.6 | Web Framework |
+| **Motor** | 3.7.0 | Async MongoDB Driver |
+| **PyJWT** | 2.10.1 | JWT Authentication |
+| **Bcrypt** | 4.2.1 | Password Hashing |
+| **HTTPx** | 0.28.1 | HTTP Client |
+| **WebSockets** | 14.1 | Real-time Communication |
+| **Stripe** | Latest | Payment Processing |
+
+### Database & Infrastructure
+
+- **MongoDB Atlas** - Cloud NoSQL Database
+- **Netlify** - Frontend Hosting
+- **Google Gemini API** - AI Chatbot
+
+---
+
+## 🏗️ Architecture
+
+### System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        CLIENT LAYER                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │   Patient    │  │    Doctor    │  │    Admin     │      │
+│  │   Portal     │  │    Portal    │  │   Portal     │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    FRONTEND (React 19)                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │   Pages  │  │Components│  │  State   │  │   API    │   │
+│  │ (30+)    │  │  (Reusable)│ │Management│ │  Client  │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                    ┌───────┴───────┐
+                    │   REST API    │
+                    │   WebSocket   │
+                    └───────┬───────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   BACKEND (FastAPI)                          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │   Auth   │  │   API    │  │WebSocket │  │ Payment  │   │
+│  │  Layer   │  │ Endpoints│  │ Manager  │  │ Gateway  │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   DATABASE (MongoDB)                         │
+│  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐   │
+│  │Users │ │Doctors│ │Appts │ │Equip │ │Payments│ │Records│ │
+│  └──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └──────┘   │
+│             (20+ Collections)                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Database Schema
+
+**21 MongoDB Collections:**
+
+1. `users` - Patient accounts and profiles
+2. `doctors` - Doctor profiles with specialties & schedules
+3. `appointments` - Appointment bookings and history
+4. `messages` - Chat and messaging system
+5. `equipment` - Medical equipment inventory
+6. `inventory` - General inventory management
+7. `shifts` - Staff shift scheduling
+8. `reports` - Medical reports and documents
+9. `analytics` - System analytics and metrics
+10. `notifications` - User notifications
+11. `payments` - Payment records
+12. `health_packages` - Health checkup packages
+13. `ambulance_requests` - Ambulance bookings
+14. `health_records` - Patient medical records
+15. `lab_tests` - Laboratory test data
+16. `beds` - Hospital bed management
+17. `prescriptions` - Doctor prescriptions
+18. `departments` - Hospital departments
+19. `ambulances` - Ambulance fleet data
+20. `payment_transactions` - Stripe transactions
+21. `package_bookings` - Package booking records
 
 ---
 
 ## 🚀 Getting Started
 
-To get a local copy up and running, follow these simple steps.
-
 ### Prerequisites
 
-* Node.js and npm installed on your machine.
-* A Firebase project with Firestore and Authentication enabled.
-* A Google AI API Key for the Gemini API.
+- **Node.js** 16.x or higher
+- **Python** 3.8 or higher
+- **MongoDB Atlas** account
+- **Firebase** project
+- **Stripe** account (for payments)
+- **Google AI API** key (for chatbot)
 
-### Installation
+### Backend Setup
 
-1.  **Clone the repository:**
-    ```sh
-    git clone [https://github.com/your-username/nirmaya_health.git](https://github.com/your-username/nirmaya_health.git)
-    ```
-2.  **Navigate to the project directory:**
-    ```sh
-    cd nirmaya_health
-    ```
-3.  **Install NPM packages:**
-    ```sh
-    npm install
-    ```
-4.  **Set up your environment variables:**
-    * Create a `firebase.js` file in the `src/` directory:
-        ```javascript
-        // src/firebase.js
-        import { initializeApp } from "firebase/app";
-        import { getFirestore } from "firebase/firestore";
-        import { getAuth } from "firebase/auth";
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/RSaha0507/Nirmaya-Health-Services.git
+   cd Nirmaya-Health-Services
+   ```
 
-        const firebaseConfig = {
-          apiKey: "YOUR_API_KEY",
-          authDomain: "YOUR_AUTH_DOMAIN",
-          // ... paste the rest of your config keys
-        };
+2. **Navigate to backend**
+   ```bash
+   cd backend
+   ```
 
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
+3. **Create virtual environment**
+   ```bash
+   python -m venv venv
+   
+   # Windows
+   venv\Scripts\activate
+   
+   # macOS/Linux
+   source venv/bin/activate
+   ```
 
-        export { db, auth };
-        ```
-    * In `src/components/Chatbot.js`, add your Gemini API key:
-        ```javascript
-        const apiKey = "YOUR_GEMINI_API_KEY";
-        ```
-5.  **Run the application:**
-    ```sh
-    npm start
-    ```
-    The application will be available at `http://localhost:3000`.
+4. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+5. **Configure environment variables**
+   
+   Create a `.env` file in the `backend` directory:
+   ```env
+   MONGO_URL=mongodb+srv://username:password@cluster.mongodb.net/nirmaya_health
+   JWT_SECRET=your_super_secret_jwt_key_here
+   EMERGENT_LLM_KEY=your_gemini_api_key_here
+   STRIPE_API_KEY=your_stripe_secret_key_here
+   ```
+
+6. **Run the backend server**
+   ```bash
+   python server.py
+   ```
+   
+   Server will start at `http://localhost:8001`
+
+### Frontend Setup
+
+1. **Navigate to frontend**
+   ```bash
+   cd ../frontend
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Configure Firebase**
+   
+   Create `src/firebase.js`:
+   ```javascript
+   import { initializeApp } from "firebase/app";
+   import { getFirestore } from "firebase/firestore";
+   import { getAuth } from "firebase/auth";
+
+   const firebaseConfig = {
+     apiKey: "YOUR_API_KEY",
+     authDomain: "YOUR_AUTH_DOMAIN",
+     projectId: "YOUR_PROJECT_ID",
+     storageBucket: "YOUR_STORAGE_BUCKET",
+     messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+     appId: "YOUR_APP_ID"
+   };
+
+   const app = initializeApp(firebaseConfig);
+   export const db = getFirestore(app);
+   export const auth = getAuth(app);
+   ```
+
+4. **Configure environment variables**
+   
+   Create `.env` in the `frontend` directory:
+   ```env
+   REACT_APP_BACKEND_URL=http://localhost:8001/api
+   ```
+
+5. **Start development server**
+   ```bash
+   npm start
+   ```
+   
+   Application will open at `http://localhost:3000`
+
+### Demo Accounts
+
+**Admin Access:**
+- Email: `admin@nirmaya.com`
+- Password: `admin123`
+
+**Doctor Access:**
+- Email: `ananya@nirmaya.com`
+- Password: `doctor123`
+
+**Patient Access:**
+- Create a new account via Sign Up
+
+---
+
+## 📁 Project Structure
+
+```
+Nirmaya-Health-Services/
+│
+├── backend/
+│   ├── server.py              # Main FastAPI application (98KB)
+│   ├── requirements.txt       # Python dependencies
+│   ├── .env                   # Environment variables
+│   ├── seeds/                 # Database seeding scripts
+│   └── venv/                  # Virtual environment
+│
+├── frontend/
+│   ├── public/
+│   │   ├── logo.png           # Application logo
+│   │   └── index.html         # HTML template
+│   │
+│   ├── src/
+│   │   ├── components/        # Reusable components
+│   │   │   ├── Chatbot.js
+│   │   │   ├── Navbar.js
+│   │   │   ├── Footer.js
+│   │   │   └── ...
+│   │   │
+│   │   ├── pages/             # 30+ page components
+│   │   │   ├── HomePage.js
+│   │   │   ├── LoginPage.js
+│   │   │   ├── DoctorsPage.js
+│   │   │   ├── AdminDashboard.js
+│   │   │   ├── DoctorPortal.js
+│   │   │   └── ...
+│   │   │
+│   │   ├── data/              # Static data for departments
+│   │   │   ├── cardiology.js
+│   │   │   ├── neurology.js
+│   │   │   └── ...
+│   │   │
+│   │   ├── App.js             # Main application component
+│   │   ├── firebase.js        # Firebase configuration
+│   │   └── index.js           # Application entry point
+│   │
+│   ├── package.json           # Node dependencies
+│   ├── tailwind.config.js     # Tailwind configuration
+│   └── postcss.config.js      # PostCSS configuration
+│
+├── .gitignore
+├── README.md
+└── LICENSE
+```
+
+---
+
+## 📚 API Documentation
+
+### Authentication Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/register` | Register new user |
+| POST | `/api/auth/login` | User login |
+| POST | `/api/auth/logout` | User logout |
+| GET | `/api/auth/me` | Get current user |
+
+### Doctor Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/doctors` | Get all doctors |
+| GET | `/api/doctors/{id}` | Get doctor by ID |
+| POST | `/api/doctors` | Create doctor (Admin) |
+| PUT | `/api/doctors/{id}` | Update doctor (Admin) |
+| DELETE | `/api/doctors/{id}` | Delete doctor (Admin) |
+
+### Appointment Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/appointments` | Get user appointments |
+| POST | `/api/appointments` | Book appointment |
+| PUT | `/api/appointments/{id}` | Update appointment |
+| DELETE | `/api/appointments/{id}` | Cancel appointment |
+
+### Payment Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/payments/create-checkout` | Create Stripe session |
+| GET | `/api/payments/status/{session_id}` | Get payment status |
+| GET | `/api/payments/history` | Get payment history |
+
+### WebSocket Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| WS `/api/ws/{user_id}` | WebSocket connection |
+
+*For complete API documentation, run the backend and visit: `http://localhost:8001/docs`*
+
+---
+
+## 👥 User Roles
+
+### Patient Role
+- Browse doctors and departments
+- Book and manage appointments
+- Access medical records
+- Chat with AI assistant
+- Request ambulance services
+- Purchase health packages
+- Make online payments
+
+### Doctor Role
+- View appointment schedule
+- Access patient records
+- Manage consultations
+- Generate prescriptions
+- Update availability
+- Communicate with patients
+
+### Admin Role
+- Complete system control
+- User management (CRUD)
+- Doctor management (CRUD)
+- Appointment oversight
+- Equipment inventory
+- Analytics and reports
+- System configuration
+- Payment management
+
+---
+
+## 📸 Screenshots
+
+### Homepage
+![Homepage](https://via.placeholder.com/800x400?text=Homepage+Screenshot)
+
+### Patient Dashboard
+![Patient Dashboard](https://via.placeholder.com/800x400?text=Patient+Dashboard)
+
+### Doctor Portal
+![Doctor Portal](https://via.placeholder.com/800x400?text=Doctor+Portal)
+
+### Admin Panel
+![Admin Panel](https://via.placeholder.com/800x400?text=Admin+Panel)
+
+### Appointment Booking
+![Appointment Booking](https://via.placeholder.com/800x400?text=Appointment+Booking)
 
 ---
 
 ## 🌐 Deployment
 
-This application is configured for easy deployment on platforms like Netlify or Vercel.
+### Frontend (Netlify)
 
-1.  **Build the application:**
-    ```sh
-    npm run build
-    ```
-2.  **Deploy:**
-    * **Manual:** Drag and drop the generated `build` folder into the Netlify deploy UI.
-    * **Automated (Recommended):** Connect your GitHub repository to Netlify for continuous deployment. Netlify will automatically build and deploy your site every time you push a change.
+1. **Build the application**
+   ```bash
+   cd frontend
+   npm run build
+   ```
+
+2. **Deploy to Netlify**
+   - Connect your GitHub repository
+   - Set build command: `npm run build`
+   - Set publish directory: `build`
+   - Add environment variables in Netlify dashboard
+
+### Backend (Cloud Platform)
+
+**Recommended: Railway, Render, or Heroku**
+
+1. **Prepare for deployment**
+   - Ensure `requirements.txt` is up to date
+   - Configure production environment variables
+   - Update CORS origins for production
+
+2. **Deploy**
+   - Connect repository to hosting platform
+   - Set Python runtime version
+   - Configure environment variables
+   - Deploy!
+
+### Database (MongoDB Atlas)
+
+- Already cloud-hosted
+- Configure IP whitelist
+- Enable authentication
+- Set up backups
 
 ---
 
-## 🔮 Future Scope
+## 🗺️ Roadmap
 
-* **Implement Two-Factor Authentication (2FA):** Integrate Firebase's phone authentication to add an extra layer of security to the login process.
-* **Patient Medical Records:** Add a secure section for patients to view their medical history and test results.
-* **Online Payments:** Integrate a payment gateway like Stripe or Razorpay for appointment and health checkup fees.
-* **Real-time Notifications:** Use Firebase Cloud Messaging to send real-time appointment reminders to users.
+### Phase 1 (Current)
+- [x] Core hospital management features
+- [x] Multi-role authentication
+- [x] Appointment booking system
+- [x] Payment integration
+- [x] AI chatbot
+- [x] Real-time notifications
+
+### Phase 2 (Next)
+- [ ] Video consultation integration
+- [ ] Mobile app (React Native)
+- [ ] Two-factor authentication
+- [ ] Advanced analytics dashboard
+- [ ] Email/SMS notifications
+- [ ] Multi-language support
+
+### Phase 3 (Future)
+- [ ] Prescription management system
+- [ ] Lab test result integration
+- [ ] Insurance claim processing
+- [ ] Telemedicine platform
+- [ ] IoT device integration
+- [ ] ML-based health predictions
 
 ---
 
-## ✍️ Author
+## 🤝 Contributing
 
-* **Rounak Saha** - *Initial work* - [github.com/RSaha0507](https://github.com/RSaha0507)
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+### Development Guidelines
+
+- Follow existing code style
+- Write meaningful commit messages
+- Add comments for complex logic
+- Test thoroughly before submitting
+- Update documentation as needed
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+---
+
+## 📧 Contact
+
+**Rounak Saha**
+
+- GitHub: [@RSaha0507](https://github.com/RSaha0507)
+- Email: rounak.saha@example.com
+- LinkedIn: [Rounak Saha](https://linkedin.com/in/rounak-saha)
+
+**Project Link:** [https://github.com/RSaha0507/Nirmaya-Health-Services](https://github.com/RSaha0507/Nirmaya-Health-Services)
+
+**Live Demo:** [https://nirmayahealthservices.netlify.app/](https://nirmayahealthservices.netlify.app/)
+
+---
+
+## 🙏 Acknowledgments
+
+- [React](https://reactjs.org/) - Frontend framework
+- [FastAPI](https://fastapi.tiangolo.com/) - Backend framework
+- [MongoDB](https://www.mongodb.com/) - Database
+- [TailwindCSS](https://tailwindcss.com/) - CSS framework
+- [Stripe](https://stripe.com/) - Payment processing
+- [Google Gemini](https://ai.google.dev/) - AI chatbot
+- [Lucide](https://lucide.dev/) - Icon library
+- [Recharts](https://recharts.org/) - Chart library
+
+---
+
+<div align="center">
+
+### ⭐ Star this repository if you found it helpful!
+
+**Made with ❤️ by Rounak Saha**
+
+</div>
