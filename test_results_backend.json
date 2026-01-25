@@ -1,0 +1,98 @@
+[
+  {
+    "test": "Health Check",
+    "status": "PASS",
+    "details": "Version: 3.0.0",
+    "timestamp": "2025-12-30T11:56:07.702621"
+  },
+  {
+    "test": "Patient Registration",
+    "status": "PASS",
+    "details": "User ID: 895c41f6-8c75-44c9-9ad5-3fe8586eb61a",
+    "timestamp": "2025-12-30T11:56:07.988325"
+  },
+  {
+    "test": "Admin Login",
+    "status": "PASS",
+    "details": "User: Admin",
+    "timestamp": "2025-12-30T11:56:08.225590"
+  },
+  {
+    "test": "Doctor Login",
+    "status": "PASS",
+    "details": "Dr. Dr. Ananya Sharma",
+    "timestamp": "2025-12-30T11:56:08.462599"
+  },
+  {
+    "test": "/doctors (admin)",
+    "status": "PASS",
+    "details": "5 items returned",
+    "timestamp": "2025-12-30T11:56:08.469524"
+  },
+  {
+    "test": "/equipment (admin)",
+    "status": "PASS",
+    "details": "10 items returned",
+    "timestamp": "2025-12-30T11:56:08.475934"
+  },
+  {
+    "test": "/appointments (admin)",
+    "status": "PASS",
+    "details": "0 items returned",
+    "timestamp": "2025-12-30T11:56:08.548940"
+  },
+  {
+    "test": "/health-packages (admin)",
+    "status": "PASS",
+    "details": "0 items returned",
+    "timestamp": "2025-12-30T11:56:08.595183"
+  },
+  {
+    "test": "/beds (admin)",
+    "status": "PASS",
+    "details": "0 items returned",
+    "timestamp": "2025-12-30T11:56:08.641418"
+  },
+  {
+    "test": "/lab-tests (admin)",
+    "status": "PASS",
+    "details": "0 items returned",
+    "timestamp": "2025-12-30T11:56:08.647948"
+  },
+  {
+    "test": "/inventory (admin)",
+    "status": "PASS",
+    "details": "0 items returned",
+    "timestamp": "2025-12-30T11:56:08.697284"
+  },
+  {
+    "test": "/shifts (admin)",
+    "status": "PASS",
+    "details": "0 items returned",
+    "timestamp": "2025-12-30T11:56:08.746317"
+  },
+  {
+    "test": "/analytics/admin (admin)",
+    "status": "PASS",
+    "details": "Valid response structure",
+    "timestamp": "2025-12-30T11:56:08.755719"
+  },
+  {
+    "test": "/analytics/patient (patient)",
+    "status": "PASS",
+    "details": "Valid response structure",
+    "timestamp": "2025-12-30T11:56:08.804419"
+  },
+  {
+    "test": "/analytics/doctor (doctor)",
+    "status": "PASS",
+    "details": "Valid response structure",
+    "timestamp": "2025-12-30T11:56:08.811971"
+  },
+  {
+    "test": "Appointment Booking",
+    "status": "PASS",
+    "details": "Appointment ID: 565bff38-250f-439c-8a57-05e3c43bd6df",
+    "timestamp": "2025-12-30T11:56:08.846986"
+  }
+]
