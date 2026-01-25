@@ -608,8 +608,8 @@ Distributed under the MIT License. See `LICENSE` for more information.
 **Rounak Saha**
 
 - GitHub: [@RSaha0507](https://github.com/RSaha0507)
-- Email: rounak.saha@example.com
-- LinkedIn: [Rounak Saha](https://linkedin.com/in/rounak-saha)
+- Email: rs574.cs008@gmail.com
+- LinkedIn: [Rounak Saha](https://linkedin.com/in/rounak-saha-932ab0253)
 
 **Project Link:** [https://github.com/RSaha0507/Nirmaya-Health-Services](https://github.com/RSaha0507/Nirmaya-Health-Services)
 
