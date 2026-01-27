@@ -472,20 +472,27 @@ Nirmaya-Health-Services/
 ## 📸 Screenshots
 
 ### Homepage
-![Homepage]<img width="1880" height="827" alt="image" src="https://github.com/user-attachments/assets/79fa12a2-d26a-450f-b915-c6fa6ce51dea" />
+<img width="1880" height="827" alt="image" src="https://github.com/user-attachments/assets/79fa12a2-d26a-450f-b915-c6fa6ce51dea" />
 
 
 ### Patient Dashboard
-![Patient Dashboard](https://via.placeholder.com/800x400?text=Patient+Dashboard)
+<img width="1781" height="813" alt="image" src="https://github.com/user-attachments/assets/f83942fc-c032-43d4-b768-19f6d7b44a88" />
+<img width="1603" height="570" alt="image" src="https://github.com/user-attachments/assets/1b5a0290-6937-4944-b8f2-dcb21c34a9af" />
+
 
 ### Doctor Portal
-![Doctor Portal](https://via.placeholder.com/800x400?text=Doctor+Portal)
+<img width="1725" height="815" alt="image" src="https://github.com/user-attachments/assets/4bf0ae3d-7ddc-47b0-ada7-efb555079d03" />
+
 
 ### Admin Panel
-![Admin Panel](https://via.placeholder.com/800x400?text=Admin+Panel)
+<img width="1735" height="826" alt="image" src="https://github.com/user-attachments/assets/165b1722-cf61-4e37-aec4-16d5f67b84b8" />
+
 
 ### Appointment Booking
-![Appointment Booking](https://via.placeholder.com/800x400?text=Appointment+Booking)
+<img width="1589" height="819" alt="image" src="https://github.com/user-attachments/assets/64bbfb6c-7cbc-46e8-9ad8-6da66bd357f3" />
+<img width="1546" height="821" alt="image" src="https://github.com/user-attachments/assets/89589f87-6cf5-47ff-b55f-691946b99bfe" />
+<img width="1545" height="821" alt="image" src="https://github.com/user-attachments/assets/46b0aa0f-9884-4b57-8e61-c91073678fc0" />
+
 
 ---
 
