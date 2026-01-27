@@ -2,7 +2,8 @@
 
 <div align="center">
 
-![Nirmaya Health Banner](https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=1200&h=300&fit=crop)
+![Nirmaya Health Banner]<img width="1919" height="832" alt="image" src="https://github.com/user-attachments/assets/5c265878-6bdc-4e92-b738-4d54cdabdfc9" />
+
 
 ### Smart Hospital Management System
 
