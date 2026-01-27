@@ -472,7 +472,8 @@ Nirmaya-Health-Services/
 ## 📸 Screenshots
 
 ### Homepage
-![Homepage](https://via.placeholder.com/800x400?text=Homepage+Screenshot)
+![Homepage]<img width="1880" height="827" alt="image" src="https://github.com/user-attachments/assets/79fa12a2-d26a-450f-b915-c6fa6ce51dea" />
+
 
 ### Patient Dashboard
 ![Patient Dashboard](https://via.placeholder.com/800x400?text=Patient+Dashboard)
