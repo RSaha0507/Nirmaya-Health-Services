@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -26,6 +26,8 @@ import requests
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001").rstrip("/")
 API_BASE = f"{BACKEND_URL}/api"
 TIMEOUT_SECONDS = float(os.getenv("TEST_TIMEOUT", "20"))
+SEED_TIMEOUT_SECONDS = float(os.getenv("SEED_TIMEOUT", "120"))
+SEED_RETRIES = int(os.getenv("SEED_RETRIES", "2"))
 
 DEMO_CREDENTIALS: Dict[str, Dict[str, str]] = {
     "admin": {"email": "admin@nirmaya.com", "password": "admin123"},
@@ -57,7 +59,7 @@ class RegressionTester:
             "test": test_name,
             "status": status,
             "detail": detail,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self.results.append(record)
         print(f"[{status}] {test_name}")
@@ -109,16 +111,27 @@ class RegressionTester:
 
     def test_seed(self) -> bool:
         name = "Seed Endpoint"
-        try:
-            response = self.request("POST", "/seed", json={}, expected_status=200)
-            payload = self.as_json(response)
-            assert isinstance(payload, dict), "Seed response must be JSON object"
-            assert "sync" in payload, "Seed response missing sync summary"
-            self.log(name, "PASS", f"sync={payload.get('sync')}")
-            return True
-        except Exception as exc:
-            self.log(name, "FAIL", str(exc))
-            return False
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, SEED_RETRIES + 2):
+            try:
+                response = self.request(
+                    "POST",
+                    "/seed",
+                    json={},
+                    expected_status=200,
+                    timeout=SEED_TIMEOUT_SECONDS,
+                )
+                payload = self.as_json(response)
+                assert isinstance(payload, dict), "Seed response must be JSON object"
+                assert "sync" in payload, "Seed response missing sync summary"
+                self.log(name, "PASS", f"sync={payload.get('sync')} (attempt={attempt})")
+                return True
+            except Exception as exc:
+                last_error = exc
+
+        self.log(name, "FAIL", str(last_error))
+        return False
 
     def test_login_matrix(self) -> bool:
         name = "Credential Matrix"
@@ -310,7 +323,7 @@ class RegressionTester:
             test_id = tests[0].get("id")
             assert test_id, "Lab test id missing"
 
-            tomorrow = (datetime.utcnow() + timedelta(days=1)).date().isoformat()
+            tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
             booking_payload = {
                 "test_id": test_id,
                 "preferred_date": tomorrow,

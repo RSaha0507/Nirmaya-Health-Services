@@ -9,13 +9,13 @@
 
 **A modern, comprehensive full-stack healthcare platform built with React & FastAPI**
 
-[![Live Demo](https://img.shields.io/badge/demo-live-success?style=for-the-badge)](https://nirmayahealthservices.netlify.app/)
+[![Live Demo](https://img.shields.io/badge/demo-live-success?style=for-the-badge)](https://nirmaya-health-services.netlify.app/)
 [![React](https://img.shields.io/badge/React-19.1.1-61dafb?style=for-the-badge&logo=react)](https://reactjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 
-[Live Demo](https://nirmayahealthservices.netlify.app/) • [Report Bug](https://github.com/RSaha0507/Nirmaya-Health-Services/issues) • [Request Feature](https://github.com/RSaha0507/Nirmaya-Health-Services/issues)
+[Live Demo](https://nirmaya-health-services.netlify.app/) • [Report Bug](https://github.com/RSaha0507/Nirmaya-Health-Services/issues) • [Request Feature](https://github.com/RSaha0507/Nirmaya-Health-Services/issues)
 
 </div>
 
@@ -600,7 +600,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 **Project Link:** [https://github.com/RSaha0507/Nirmaya-Health-Services](https://github.com/RSaha0507/Nirmaya-Health-Services)
 
-**Live Demo:** [https://nirmayahealthservices.netlify.app/](https://nirmayahealthservices.netlify.app/)
+**Live Demo:** [https://nirmaya-health-services.netlify.app/](https://nirmaya-health-services.netlify.app/)
 
 ---
 
