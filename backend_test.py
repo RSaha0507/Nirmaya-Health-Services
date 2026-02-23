@@ -1,556 +1,454 @@
 #!/usr/bin/env python3
 """
-Nirmaya Health Services - Backend API Testing
-Testing all critical endpoints and authentication flows
+Nirmaya Health Services regression suite.
+
+Covers deployment regressions around:
+- Departments listing and detail hydration
+- Doctors catalog completeness (not capped to only a few records)
+- Operations roles (admin/hospital admin/staff/nurse) access to beds, patients, analytics
+- Lab test details enrichment (includes + price breakup)
+- Profile update behavior for patient and doctor
+- Bed admit/discharge operational flow
 """
 
-import requests
+from __future__ import annotations
+
 import json
+import os
 import sys
+import uuid
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-# Configuration
-BACKEND_URL = "https://smart-hospital-9.preview.emergentagent.com"
+import requests
+
+
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001").rstrip("/")
 API_BASE = f"{BACKEND_URL}/api"
+TIMEOUT_SECONDS = float(os.getenv("TEST_TIMEOUT", "20"))
 
-# Test credentials
-TEST_CREDENTIALS = {
+DEMO_CREDENTIALS: Dict[str, Dict[str, str]] = {
     "admin": {"email": "admin@nirmaya.com", "password": "admin123"},
     "doctor": {"email": "ananya@nirmaya.com", "password": "doctor123"},
-    "new_patient": {
-        "name": "Test User",
-        "email": "testuser@test.com", 
-        "password": "test1234",
-        "phone": "+919876543210"
-    }
+    "hospital_admin": {"email": "hospital.admin@nirmaya.com", "password": "hospital123"},
+    "staff": {"email": "staff@nirmaya.com", "password": "staff123"},
+    "nurse": {"email": "nurse@nirmaya.com", "password": "nurse123"},
 }
 
-class NirmayaAPITester:
-    def __init__(self):
+EXPECTED_ROLES = {
+    "admin": "admin",
+    "doctor": "doctor",
+    "hospital_admin": "hospital_administrator",
+    "staff": "staff",
+    "nurse": "nurse",
+}
+
+
+class RegressionTester:
+    def __init__(self) -> None:
         self.session = requests.Session()
-        self.tokens = {}
-        self.test_results = []
-        
-    def log_test(self, test_name, status, details=""):
-        """Log test results"""
-        result = {
+        self.results: List[Dict[str, Any]] = []
+        self.tokens: Dict[str, str] = {}
+        self.users: Dict[str, Dict[str, Any]] = {}
+        self.temp_patient_id: Optional[str] = None
+
+    def log(self, test_name: str, status: str, detail: str = "") -> None:
+        record = {
             "test": test_name,
             "status": status,
-            "details": details,
-            "timestamp": datetime.now().isoformat()
+            "detail": detail,
+            "timestamp": datetime.utcnow().isoformat(),
         }
-        self.test_results.append(result)
-        status_symbol = "✅" if status == "PASS" else "❌"
-        print(f"{status_symbol} {test_name}: {status}")
-        if details:
-            print(f"   Details: {details}")
-    
-    def test_health_check(self):
-        """Test basic health endpoint"""
-        try:
-            response = self.session.get(f"{API_BASE}/health", timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("status") == "healthy":
-                    self.log_test("Health Check", "PASS", f"Version: {data.get('version')}")
-                    return True
-                else:
-                    self.log_test("Health Check", "FAIL", "Status not healthy")
-                    return False
-            else:
-                self.log_test("Health Check", "FAIL", f"HTTP {response.status_code}")
-                return False
-        except Exception as e:
-            self.log_test("Health Check", "FAIL", str(e))
-            return False
-    
-    def test_user_registration(self):
-        """Test new patient registration"""
-        try:
-            # First try to register new user
-            response = self.session.post(
-                f"{API_BASE}/auth/register",
-                json=TEST_CREDENTIALS["new_patient"],
-                timeout=10
+        self.results.append(record)
+        print(f"[{status}] {test_name}")
+        if detail:
+            print(f"  {detail}")
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: Optional[str] = None,
+        expected_status: Optional[int] = None,
+        **kwargs: Any,
+    ) -> requests.Response:
+        headers = kwargs.pop("headers", {}) or {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = TIMEOUT_SECONDS
+
+        response = self.session.request(method, f"{API_BASE}{path}", headers=headers, **kwargs)
+        if expected_status is not None and response.status_code != expected_status:
+            body = response.text[:600].replace("\n", " ")
+            raise AssertionError(
+                f"{method} {path} expected HTTP {expected_status}, got {response.status_code}. Body: {body}"
             )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if "token" in data and "user" in data:
-                    self.tokens["patient"] = data["token"]
-                    self.log_test("Patient Registration", "PASS", f"User ID: {data['user']['id']}")
-                    return True
-                else:
-                    self.log_test("Patient Registration", "FAIL", "Missing token or user data")
-                    return False
-            elif response.status_code == 400:
-                # User might already exist, try to login instead
-                return self.test_patient_login_existing()
-            else:
-                self.log_test("Patient Registration", "FAIL", f"HTTP {response.status_code}: {response.text}")
-                return False
-        except Exception as e:
-            self.log_test("Patient Registration", "FAIL", str(e))
-            return False
-    
-    def test_patient_login_existing(self):
-        """Login with existing patient credentials"""
+        return response
+
+    @staticmethod
+    def as_json(response: requests.Response) -> Any:
         try:
-            response = self.session.post(
-                f"{API_BASE}/auth/login",
-                json={
-                    "email": TEST_CREDENTIALS["new_patient"]["email"],
-                    "password": TEST_CREDENTIALS["new_patient"]["password"]
-                },
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if "token" in data:
-                    self.tokens["patient"] = data["token"]
-                    self.log_test("Patient Login (Existing)", "PASS", f"Role: {data['user']['role']}")
-                    return True
-                else:
-                    self.log_test("Patient Login (Existing)", "FAIL", "Missing token")
-                    return False
-            else:
-                self.log_test("Patient Login (Existing)", "FAIL", f"HTTP {response.status_code}")
-                return False
-        except Exception as e:
-            self.log_test("Patient Login (Existing)", "FAIL", str(e))
-            return False
-    
-    def test_admin_login(self):
-        """Test admin login"""
+            return response.json()
+        except Exception:
+            return None
+
+    def test_health(self) -> bool:
+        name = "Health Check"
         try:
-            response = self.session.post(
-                f"{API_BASE}/auth/login",
-                json=TEST_CREDENTIALS["admin"],
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if "token" in data and data["user"]["role"] == "admin":
-                    self.tokens["admin"] = data["token"]
-                    self.log_test("Admin Login", "PASS", f"User: {data['user']['name']}")
-                    return True
-                else:
-                    self.log_test("Admin Login", "FAIL", "Invalid response or role")
-                    return False
-            else:
-                self.log_test("Admin Login", "FAIL", f"HTTP {response.status_code}")
-                return False
-        except Exception as e:
-            self.log_test("Admin Login", "FAIL", str(e))
-            return False
-    
-    def test_doctor_login(self):
-        """Test doctor login"""
-        try:
-            response = self.session.post(
-                f"{API_BASE}/auth/login",
-                json=TEST_CREDENTIALS["doctor"],
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if "token" in data and data["user"]["role"] == "doctor":
-                    self.tokens["doctor"] = data["token"]
-                    self.log_test("Doctor Login", "PASS", f"Dr. {data['user']['name']}")
-                    return True
-                else:
-                    self.log_test("Doctor Login", "FAIL", "Invalid response or role")
-                    return False
-            else:
-                self.log_test("Doctor Login", "FAIL", f"HTTP {response.status_code}")
-                return False
-        except Exception as e:
-            self.log_test("Doctor Login", "FAIL", str(e))
-            return False
-    
-    def test_protected_endpoint(self, endpoint, role, expected_fields=None):
-        """Test a protected endpoint with specific role"""
-        if role not in self.tokens:
-            self.log_test(f"{endpoint} ({role})", "SKIP", f"No {role} token available")
-            return False
-            
-        try:
-            headers = {"Authorization": f"Bearer {self.tokens[role]}"}
-            response = self.session.get(f"{API_BASE}{endpoint}", headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list):
-                    count = len(data)
-                    self.log_test(f"{endpoint} ({role})", "PASS", f"{count} items returned")
-                elif isinstance(data, dict):
-                    if expected_fields:
-                        missing_fields = [f for f in expected_fields if f not in data]
-                        if missing_fields:
-                            self.log_test(f"{endpoint} ({role})", "FAIL", f"Missing fields: {missing_fields}")
-                            return False
-                    self.log_test(f"{endpoint} ({role})", "PASS", "Valid response structure")
-                else:
-                    self.log_test(f"{endpoint} ({role})", "PASS", "Response received")
-                return True
-            else:
-                self.log_test(f"{endpoint} ({role})", "FAIL", f"HTTP {response.status_code}")
-                return False
-        except Exception as e:
-            self.log_test(f"{endpoint} ({role})", "FAIL", str(e))
-            return False
-    
-    def test_departments_api(self):
-        """Test departments API endpoints"""
-        try:
-            # Test GET /api/departments - should return 16 departments
-            response = self.session.get(f"{API_BASE}/departments", timeout=10)
-            if response.status_code == 200:
-                departments = response.json()
-                if len(departments) == 16:
-                    self.log_test("Departments API - List", "PASS", f"Found {len(departments)} departments")
-                else:
-                    self.log_test("Departments API - List", "FAIL", f"Expected 16 departments, got {len(departments)}")
-                    return False
-            else:
-                self.log_test("Departments API - List", "FAIL", f"HTTP {response.status_code}")
-                return False
-            
-            # Test GET /api/departments/cardiology - should return cardiology details
-            response = self.session.get(f"{API_BASE}/departments/cardiology", timeout=10)
-            if response.status_code == 200:
-                cardiology = response.json()
-                required_fields = ["name", "doctors", "health_packages"]
-                missing_fields = [f for f in required_fields if f not in cardiology]
-                if not missing_fields:
-                    self.log_test("Departments API - Cardiology Detail", "PASS", 
-                                f"Doctors: {len(cardiology.get('doctors', []))}, Packages: {len(cardiology.get('health_packages', []))}")
-                else:
-                    self.log_test("Departments API - Cardiology Detail", "FAIL", f"Missing fields: {missing_fields}")
-                    return False
-            else:
-                self.log_test("Departments API - Cardiology Detail", "FAIL", f"HTTP {response.status_code}")
-                return False
-            
+            response = self.request("GET", "/health", expected_status=200)
+            payload = self.as_json(response)
+            assert isinstance(payload, dict), "Health response must be JSON object"
+            assert payload.get("status") == "healthy", "Health status is not healthy"
+            self.log(name, "PASS", f"version={payload.get('version')}")
             return True
-        except Exception as e:
-            self.log_test("Departments API", "FAIL", str(e))
+        except Exception as exc:
+            self.log(name, "FAIL", str(exc))
             return False
-    
-    def test_health_packages_api(self):
-        """Test health packages API"""
+
+    def test_seed(self) -> bool:
+        name = "Seed Endpoint"
         try:
-            # Test GET /api/health-packages - should return 20 packages
-            response = self.session.get(f"{API_BASE}/health-packages", timeout=10)
-            if response.status_code == 200:
-                packages = response.json()
-                if len(packages) == 20:
-                    self.log_test("Health Packages API", "PASS", f"Found {len(packages)} packages")
-                    return True
-                else:
-                    self.log_test("Health Packages API", "FAIL", f"Expected 20 packages, got {len(packages)}")
-                    return False
-            else:
-                self.log_test("Health Packages API", "FAIL", f"HTTP {response.status_code}")
-                return False
-        except Exception as e:
-            self.log_test("Health Packages API", "FAIL", str(e))
-            return False
-    
-    def test_beds_api(self):
-        """Test beds API endpoints"""
-        try:
-            # Test GET /api/beds - should return beds
-            response = self.session.get(f"{API_BASE}/beds", timeout=10)
-            if response.status_code == 200:
-                beds = response.json()
-                self.log_test("Beds API - List", "PASS", f"Found {len(beds)} beds")
-            else:
-                self.log_test("Beds API - List", "FAIL", f"HTTP {response.status_code}")
-                return False
-            
-            # Test GET /api/beds/availability - should return ward-wise availability
-            response = self.session.get(f"{API_BASE}/beds/availability", timeout=10)
-            if response.status_code == 200:
-                availability = response.json()
-                if isinstance(availability, dict):
-                    ward_count = len(availability)
-                    self.log_test("Beds API - Availability", "PASS", f"Ward availability for {ward_count} wards")
-                else:
-                    self.log_test("Beds API - Availability", "FAIL", "Invalid response format")
-                    return False
-            else:
-                self.log_test("Beds API - Availability", "FAIL", f"HTTP {response.status_code}")
-                return False
-            
+            response = self.request("POST", "/seed", json={}, expected_status=200)
+            payload = self.as_json(response)
+            assert isinstance(payload, dict), "Seed response must be JSON object"
+            assert "sync" in payload, "Seed response missing sync summary"
+            self.log(name, "PASS", f"sync={payload.get('sync')}")
             return True
-        except Exception as e:
-            self.log_test("Beds API", "FAIL", str(e))
+        except Exception as exc:
+            self.log(name, "FAIL", str(exc))
             return False
-    
-    def test_ambulances_api(self):
-        """Test ambulances API endpoints"""
+
+    def test_login_matrix(self) -> bool:
+        name = "Credential Matrix"
+        failures: List[str] = []
+
+        for key, creds in DEMO_CREDENTIALS.items():
+            try:
+                response = self.request("POST", "/auth/login", json=creds, expected_status=200)
+                payload = self.as_json(response)
+                assert isinstance(payload, dict), f"{key}: login response must be JSON"
+                token = payload.get("token")
+                user = payload.get("user")
+                assert token, f"{key}: token missing"
+                assert isinstance(user, dict), f"{key}: user object missing"
+                expected_role = EXPECTED_ROLES[key]
+                actual_role = str(user.get("role", "")).lower()
+                assert actual_role == expected_role, f"{key}: expected role {expected_role}, got {actual_role}"
+
+                self.tokens[key] = token
+                self.users[key] = user
+            except Exception as exc:
+                failures.append(f"{key}: {exc}")
+
+        if failures:
+            self.log(name, "FAIL", " | ".join(failures))
+            return False
+
+        self.log(name, "PASS", "All admin/doctor/hospital_admin/staff/nurse credentials are valid")
+        return True
+
+    def test_departments_and_doctors_catalog(self) -> bool:
+        name = "Departments + Doctors Catalog"
         try:
-            # Test GET /api/ambulances - should return 3 ambulances
-            response = self.session.get(f"{API_BASE}/ambulances", timeout=10)
-            if response.status_code == 200:
-                ambulances = response.json()
-                if len(ambulances) == 3:
-                    self.log_test("Ambulances API - List", "PASS", f"Found {len(ambulances)} ambulances")
-                else:
-                    self.log_test("Ambulances API - List", "FAIL", f"Expected 3 ambulances, got {len(ambulances)}")
-                    return False
-            else:
-                self.log_test("Ambulances API - List", "FAIL", f"HTTP {response.status_code}")
-                return False
-            
-            # Test GET /api/ambulances/available - should return available ambulances
-            response = self.session.get(f"{API_BASE}/ambulances/available", timeout=10)
-            if response.status_code == 200:
-                available_ambulances = response.json()
-                self.log_test("Ambulances API - Available", "PASS", f"Found {len(available_ambulances)} available ambulances")
-            else:
-                self.log_test("Ambulances API - Available", "FAIL", f"HTTP {response.status_code}")
-                return False
-            
+            dep_response = self.request("GET", "/departments", expected_status=200)
+            departments = self.as_json(dep_response)
+            assert isinstance(departments, list), "Departments response must be a list"
+            assert len(departments) >= 10, f"Expected at least 10 departments, got {len(departments)}"
+
+            for dept in departments:
+                assert dept.get("name"), "Department name missing"
+                assert dept.get("slug"), f"Department slug missing for {dept.get('name')}"
+
+            detail_checked = False
+            for dept in departments[:8]:
+                slug = dept.get("slug")
+                if not slug:
+                    continue
+                detail_response = self.request("GET", f"/departments/{slug}", expected_status=200)
+                detail = self.as_json(detail_response)
+                assert isinstance(detail, dict), "Department detail must be object"
+                assert "doctors" in detail, "Department detail missing doctors"
+                assert "health_packages" in detail, "Department detail missing health packages"
+                detail_checked = True
+                break
+
+            assert detail_checked, "Could not validate any department detail"
+
+            doctors_response = self.request("GET", "/doctors", expected_status=200)
+            doctors = self.as_json(doctors_response)
+            assert isinstance(doctors, list), "Doctors response must be list"
+            assert len(doctors) > 5, "Doctors catalog still looks capped to 5"
+            assert len(doctors) >= 10, f"Expected at least 10 doctors, got {len(doctors)}"
+
+            names = [str(doc.get("name", "")) for doc in doctors]
+            assert names == sorted(names, key=lambda n: n.lower()), "Doctors list is not sorted by name"
+
+            self.log(name, "PASS", f"departments={len(departments)}, doctors={len(doctors)}")
             return True
-        except Exception as e:
-            self.log_test("Ambulances API", "FAIL", str(e))
+        except Exception as exc:
+            self.log(name, "FAIL", str(exc))
             return False
-    
-    def test_stripe_payment_api(self):
-        """Test Stripe payment API with admin/patient login"""
-        if "patient" not in self.tokens:
-            self.log_test("Stripe Payment API", "SKIP", "No patient token")
+
+    def test_operations_access_matrix(self) -> bool:
+        name = "Operations Access Matrix"
+        roles = ["admin", "hospital_admin", "staff", "nurse"]
+        required_analytics_keys = {
+            "assigned_patients",
+            "active_patients",
+            "today_appointments",
+            "total_doctors",
+            "total_departments",
+            "available_beds",
+            "occupied_beds",
+            "total_beds",
+            "pending_lab_results",
+        }
+
+        failures: List[str] = []
+
+        for role_key in roles:
+            token = self.tokens.get(role_key)
+            if not token:
+                failures.append(f"{role_key}: missing token")
+                continue
+
+            try:
+                beds_response = self.request("GET", "/beds", token=token, expected_status=200)
+                beds = self.as_json(beds_response)
+                assert isinstance(beds, list), f"{role_key}: /beds is not list"
+
+                patients_response = self.request("GET", "/patients", token=token, expected_status=200)
+                patients = self.as_json(patients_response)
+                assert isinstance(patients, list), f"{role_key}: /patients is not list"
+
+                analytics_response = self.request("GET", "/analytics/operations", token=token, expected_status=200)
+                analytics = self.as_json(analytics_response)
+                assert isinstance(analytics, dict), f"{role_key}: /analytics/operations is not object"
+                missing = [k for k in required_analytics_keys if k not in analytics]
+                assert not missing, f"{role_key}: missing analytics keys {missing}"
+                assert analytics["assigned_patients"] >= analytics["active_patients"] or analytics["assigned_patients"] == analytics["active_patients"], (
+                    f"{role_key}: assigned_patients < active_patients"
+                )
+            except Exception as exc:
+                failures.append(f"{role_key}: {exc}")
+
+        if failures:
+            self.log(name, "FAIL", " | ".join(failures))
             return False
-            
+
+        self.log(name, "PASS", "All operations roles can access beds/patients/operations analytics")
+        return True
+
+    def test_lab_tests_enrichment(self) -> bool:
+        name = "Lab Tests Enrichment"
         try:
-            # First get health packages to get a package_id
-            response = self.session.get(f"{API_BASE}/health-packages", timeout=10)
-            if response.status_code != 200:
-                self.log_test("Stripe Payment API", "FAIL", "Cannot fetch health packages")
-                return False
-                
-            packages = response.json()
-            if not packages:
-                self.log_test("Stripe Payment API", "FAIL", "No health packages available")
-                return False
-            
-            package_id = packages[0]["id"]
-            
-            # Test POST /api/payments/create-checkout
-            headers = {"Authorization": f"Bearer {self.tokens['patient']}"}
-            payment_data = {
-                "package_id": package_id,
-                "payment_type": "package",
-                "origin_url": "https://smart-hospital-9.preview.emergentagent.com"
-            }
-            
-            response = self.session.post(
-                f"{API_BASE}/payments/create-checkout",
-                json=payment_data,
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                required_fields = ["checkout_url", "session_id"]
-                missing_fields = [f for f in required_fields if f not in data]
-                if not missing_fields:
-                    self.log_test("Stripe Payment API", "PASS", f"Session ID: {data.get('session_id', 'N/A')[:20]}...")
-                    return True
-                else:
-                    self.log_test("Stripe Payment API", "FAIL", f"Missing fields: {missing_fields}")
-                    return False
-            else:
-                self.log_test("Stripe Payment API", "FAIL", f"HTTP {response.status_code}: {response.text}")
-                return False
-        except Exception as e:
-            self.log_test("Stripe Payment API", "FAIL", str(e))
+            response = self.request("GET", "/lab-tests", expected_status=200)
+            tests = self.as_json(response)
+            assert isinstance(tests, list), "Lab tests response must be list"
+            assert len(tests) > 0, "No lab tests returned"
+
+            for test in tests[:5]:
+                includes = test.get("includes")
+                breakup = test.get("price_breakup")
+                assert isinstance(includes, list) and len(includes) > 0, "Lab test missing includes"
+                assert isinstance(breakup, dict), "Lab test missing price_breakup"
+                for key in ["base_test_charge", "sample_collection_charge", "reporting_charge", "total"]:
+                    assert key in breakup, f"price_breakup missing {key}"
+
+            self.log(name, "PASS", f"validated {min(5, len(tests))} tests for includes + price breakup")
+            return True
+        except Exception as exc:
+            self.log(name, "FAIL", str(exc))
             return False
-    
-    def test_ambulance_request_flow(self):
-        """Test ambulance request flow as patient"""
-        if "patient" not in self.tokens:
-            self.log_test("Ambulance Request Flow", "SKIP", "No patient token")
-            return False
-            
+
+    def test_patient_profile_and_lab_booking(self) -> bool:
+        name = "Patient Profile + Lab Booking"
         try:
-            headers = {"Authorization": f"Bearer {self.tokens['patient']}"}
-            
-            # Test POST /api/ambulances/request with form data
-            form_data = {
-                "ambulance_type": "Basic Life Support",
-                "patient_name": "Test Patient",
-                "phone": "+919876543210",
-                "pickup_address": "123 Test Street, Mumbai",
-                "emergency_type": "Emergency"
+            unique = uuid.uuid4().hex[:10]
+            register_payload = {
+                "name": "Regression Patient",
+                "email": f"regression.patient.{unique}@example.org",
+                "password": "test1234",
+                "phone": "+919000000000",
             }
-            
-            response = self.session.post(
-                f"{API_BASE}/ambulances/request",
-                data=form_data,
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                required_fields = ["request_id", "status", "eta_minutes"]
-                missing_fields = [f for f in required_fields if f not in data]
-                if not missing_fields:
-                    if data.get("status") == "dispatched":
-                        self.log_test("Ambulance Request Flow", "PASS", 
-                                    f"Request ID: {data['request_id']}, ETA: {data['eta_minutes']} mins")
-                        return True
-                    else:
-                        self.log_test("Ambulance Request Flow", "FAIL", f"Expected status 'dispatched', got '{data.get('status')}'")
-                        return False
-                else:
-                    self.log_test("Ambulance Request Flow", "FAIL", f"Missing fields: {missing_fields}")
-                    return False
-            else:
-                self.log_test("Ambulance Request Flow", "FAIL", f"HTTP {response.status_code}: {response.text}")
-                return False
-        except Exception as e:
-            self.log_test("Ambulance Request Flow", "FAIL", str(e))
+
+            register_response = self.request("POST", "/auth/register", json=register_payload, expected_status=200)
+            register_data = self.as_json(register_response)
+            assert isinstance(register_data, dict), "Register response must be object"
+            patient_token = register_data.get("token")
+            patient_user = register_data.get("user") or {}
+            assert patient_token, "Patient token missing after registration"
+
+            self.tokens["patient"] = patient_token
+            self.temp_patient_id = patient_user.get("id")
+
+            update_payload = {
+                "name": "Regression Patient",
+                "phone": "+919000000001",
+                "address": "221B Regression Street",
+                "date_of_birth": "1995-05-05",
+                "blood_group": "B+",
+                "emergency_contact": "+919000000002",
+                "allergies": ["Dust"],
+                "chronic_conditions": ["Asthma"],
+            }
+            profile_response = self.request("PUT", "/auth/profile", token=patient_token, json=update_payload, expected_status=200)
+            updated_profile = self.as_json(profile_response)
+            assert isinstance(updated_profile, dict), "Profile update response must be object"
+
+            me_response = self.request("GET", "/auth/me", token=patient_token, expected_status=200)
+            me = self.as_json(me_response)
+            assert isinstance(me, dict), "/auth/me must be object"
+            assert me.get("address") == "221B Regression Street", "Updated address not reflected"
+            assert me.get("phone") == "+919000000001", "Updated phone not reflected"
+
+            tests_response = self.request("GET", "/lab-tests", expected_status=200)
+            tests = self.as_json(tests_response)
+            assert isinstance(tests, list) and tests, "Cannot book lab test: no tests found"
+            test_id = tests[0].get("id")
+            assert test_id, "Lab test id missing"
+
+            tomorrow = (datetime.utcnow() + timedelta(days=1)).date().isoformat()
+            booking_payload = {
+                "test_id": test_id,
+                "preferred_date": tomorrow,
+                "preferred_time": "10:00 AM",
+                "notes": "Regression booking",
+            }
+            booking_response = self.request("POST", "/lab-tests/book", token=patient_token, json=booking_payload, expected_status=200)
+            booking = self.as_json(booking_response)
+            assert isinstance(booking, dict), "Lab booking response must be object"
+            assert booking.get("booking_id"), "Lab booking id missing"
+
+            self.log(name, "PASS", f"patient_id={self.temp_patient_id}, lab_booking_id={booking.get('booking_id')}")
+            return True
+        except Exception as exc:
+            self.log(name, "FAIL", str(exc))
             return False
-    
-    def test_appointment_booking(self):
-        """Test appointment booking as patient"""
-        if "patient" not in self.tokens:
-            self.log_test("Appointment Booking", "SKIP", "No patient token")
-            return False
-            
+
+    def test_doctor_profile_update_endpoint(self) -> bool:
+        name = "Doctor Profile Update"
         try:
-            # First get doctors list to find a doctor ID
-            headers = {"Authorization": f"Bearer {self.tokens['patient']}"}
-            doctors_response = self.session.get(f"{API_BASE}/doctors", headers=headers, timeout=10)
-            
-            if doctors_response.status_code != 200:
-                self.log_test("Appointment Booking", "FAIL", "Cannot fetch doctors list")
-                return False
-                
-            doctors = doctors_response.json()
-            if not doctors:
-                self.log_test("Appointment Booking", "FAIL", "No doctors available")
-                return False
-            
-            doctor_id = doctors[0]["id"]
-            
-            # Book appointment
-            tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-            appointment_data = {
-                "doctor_id": doctor_id,
-                "date": tomorrow,
-                "time": "10:00",
-                "reason": "Regular checkup",
-                "appointment_type": "Consultation",
-                "is_video": False
+            doctor_token = self.tokens.get("doctor")
+            assert doctor_token, "Doctor token missing"
+
+            me_response = self.request("GET", "/auth/me", token=doctor_token, expected_status=200)
+            me = self.as_json(me_response)
+            assert isinstance(me, dict), "Doctor /auth/me response invalid"
+
+            payload = {
+                "name": me.get("name", "Dr. Ananya Sharma"),
+                "phone": me.get("phone") or "+919111111111",
             }
-            
-            response = self.session.post(
-                f"{API_BASE}/appointments",
-                json=appointment_data,
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if "id" in data and "status" in data:
-                    self.log_test("Appointment Booking", "PASS", f"Appointment ID: {data['id']}")
-                    return True
-                else:
-                    self.log_test("Appointment Booking", "FAIL", "Invalid response structure")
-                    return False
-            else:
-                self.log_test("Appointment Booking", "FAIL", f"HTTP {response.status_code}: {response.text}")
-                return False
-        except Exception as e:
-            self.log_test("Appointment Booking", "FAIL", str(e))
+            update_response = self.request("PUT", "/auth/profile", token=doctor_token, json=payload, expected_status=200)
+            updated = self.as_json(update_response)
+            assert isinstance(updated, dict), "Doctor profile update response invalid"
+            assert str(updated.get("role", "")).lower() == "doctor", "Doctor role changed unexpectedly"
+            assert updated.get("name") == payload["name"], "Doctor name mismatch after profile update"
+
+            self.log(name, "PASS", "Doctor profile update endpoint accepts doctor-safe fields")
+            return True
+        except Exception as exc:
+            self.log(name, "FAIL", str(exc))
             return False
-    
-    def run_all_tests(self):
-        """Run comprehensive test suite"""
-        print("🏥 Starting Nirmaya Health Services API Tests")
-        print("=" * 60)
-        
-        # Basic connectivity
-        if not self.test_health_check():
-            print("❌ Health check failed - aborting tests")
+
+    def test_staff_bed_admit_discharge(self) -> bool:
+        name = "Bed Admit/Discharge Flow"
+        try:
+            staff_token = self.tokens.get("staff")
+            assert staff_token, "Staff token missing"
+
+            beds_response = self.request("GET", "/beds", token=staff_token, expected_status=200)
+            beds = self.as_json(beds_response)
+            assert isinstance(beds, list), "Beds response invalid"
+            available_beds = [b for b in beds if str(b.get("status", "")).lower() == "available"]
+            assert available_beds, "No available beds to test admit/discharge"
+
+            patient_id = self.temp_patient_id or f"PAT-{uuid.uuid4().hex[:8]}"
+            patient_name = "Regression Patient"
+
+            chosen_bed: Optional[Dict[str, Any]] = None
+            last_error = ""
+            for bed in available_beds[:15]:
+                bed_id = bed.get("id")
+                if not bed_id:
+                    continue
+                admit_response = self.request(
+                    "POST",
+                    f"/beds/{bed_id}/admit",
+                    token=staff_token,
+                    data={"patient_id": patient_id, "patient_name": patient_name},
+                )
+                if admit_response.status_code == 200:
+                    chosen_bed = bed
+                    break
+                last_error = f"{admit_response.status_code}: {admit_response.text[:200]}"
+
+            assert chosen_bed is not None, f"Could not admit patient to any available bed. Last error: {last_error}"
+            chosen_bed_id = chosen_bed["id"]
+
+            verify_after_admit = self.request("GET", "/beds", token=staff_token, expected_status=200)
+            beds_after_admit = self.as_json(verify_after_admit)
+            bed_after_admit = next((b for b in beds_after_admit if b.get("id") == chosen_bed_id), None)
+            assert bed_after_admit is not None, "Bed not found after admit"
+            assert str(bed_after_admit.get("status", "")).lower() == "occupied", "Bed not marked occupied after admit"
+
+            self.request("POST", f"/beds/{chosen_bed_id}/discharge", token=staff_token, data={}, expected_status=200)
+
+            verify_after_discharge = self.request("GET", "/beds", token=staff_token, expected_status=200)
+            beds_after_discharge = self.as_json(verify_after_discharge)
+            bed_after_discharge = next((b for b in beds_after_discharge if b.get("id") == chosen_bed_id), None)
+            assert bed_after_discharge is not None, "Bed not found after discharge"
+            assert str(bed_after_discharge.get("status", "")).lower() == "available", "Bed not restored to available"
+
+            self.log(name, "PASS", f"bed_id={chosen_bed_id}")
+            return True
+        except Exception as exc:
+            self.log(name, "FAIL", str(exc))
             return False
-        
-        print("\n🔐 Authentication Tests")
-        print("-" * 30)
-        self.test_user_registration()
-        self.test_admin_login()
-        self.test_doctor_login()
-        
-        print("\n📋 API Endpoint Tests (Admin)")
-        print("-" * 30)
-        admin_endpoints = [
-            "/doctors",
-            "/equipment", 
-            "/appointments",
-            "/health-packages",
-            "/beds",
-            "/lab-tests",
-            "/inventory",
-            "/shifts"
+
+    def run(self) -> bool:
+        tests = [
+            self.test_health,
+            self.test_seed,
+            self.test_login_matrix,
+            self.test_departments_and_doctors_catalog,
+            self.test_operations_access_matrix,
+            self.test_lab_tests_enrichment,
+            self.test_patient_profile_and_lab_booking,
+            self.test_doctor_profile_update_endpoint,
+            self.test_staff_bed_admit_discharge,
         ]
-        
-        for endpoint in admin_endpoints:
-            self.test_protected_endpoint(endpoint, "admin")
-        
-        print("\n📊 Analytics Tests")
-        print("-" * 30)
-        analytics_endpoints = [
-            ("/analytics/admin", "admin", ["total_users", "total_doctors", "total_appointments"]),
-            ("/analytics/patient", "patient", ["total_appointments", "completed_appointments"]),
-            ("/analytics/doctor", "doctor", ["total_appointments", "completed_appointments"])
-        ]
-        
-        for endpoint, role, expected_fields in analytics_endpoints:
-            self.test_protected_endpoint(endpoint, role, expected_fields)
-        
-        print("\n🏥 Feature Tests")
-        print("-" * 30)
-        self.test_appointment_booking()
-        
-        # Summary
-        print("\n📈 Test Summary")
-        print("=" * 60)
-        
-        passed = len([r for r in self.test_results if r["status"] == "PASS"])
-        failed = len([r for r in self.test_results if r["status"] == "FAIL"])
-        skipped = len([r for r in self.test_results if r["status"] == "SKIP"])
-        total = len(self.test_results)
-        
-        print(f"Total Tests: {total}")
-        print(f"✅ Passed: {passed}")
-        print(f"❌ Failed: {failed}")
-        print(f"⏭️  Skipped: {skipped}")
-        print(f"Success Rate: {(passed/total*100):.1f}%")
-        
-        if failed > 0:
-            print("\n❌ Failed Tests:")
-            for result in self.test_results:
-                if result["status"] == "FAIL":
-                    print(f"  - {result['test']}: {result['details']}")
-        
+
+        print("Nirmaya Health Regression Suite")
+        print(f"Backend: {BACKEND_URL}")
+        print("=" * 72)
+
+        passed = 0
+        for test in tests:
+            if test():
+                passed += 1
+
+        failed = len(tests) - passed
+        print("=" * 72)
+        print(f"Summary: {passed} passed, {failed} failed, total {len(tests)}")
+
+        try:
+            with open("test_results_backend.json", "w", encoding="utf-8") as f:
+                json.dump(self.results, f, indent=2)
+        except Exception:
+            pass
+
         return failed == 0
 
+
+def main() -> int:
+    tester = RegressionTester()
+    success = tester.run()
+    return 0 if success else 1
+
+
 if __name__ == "__main__":
-    tester = NirmayaAPITester()
-    success = tester.run_all_tests()
-    
-    # Save results to file
-    with open("/app/test_results_backend.json", "w") as f:
-        json.dump(tester.test_results, f, indent=2)
-    
-    sys.exit(0 if success else 1)
+    sys.exit(main())

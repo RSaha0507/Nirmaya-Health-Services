@@ -309,6 +309,166 @@ def generate_meeting_link():
 def generate_order_id():
     return f"ORD-{''.join(random.choices(string.ascii_uppercase + string.digits, k=8))}"
 
+def normalize_role(role: Optional[str]) -> str:
+    if not role:
+        return "patient"
+    role_map = {
+        "hospital_admin": "hospital_administrator",
+        "hospital administrator": "hospital_administrator",
+    }
+    lowered = role.strip().lower()
+    return role_map.get(lowered, lowered)
+
+def has_any_role(user: dict, allowed_roles: List[str]) -> bool:
+    return normalize_role(user.get("role")) in {normalize_role(role) for role in allowed_roles}
+
+def slugify(value: str) -> str:
+    return "-".join(
+        "".join(ch.lower() if ch.isalnum() else " " for ch in (value or "")).split()
+    )
+
+def default_department_from_name(name: str) -> dict:
+    return {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "slug": slugify(name),
+        "icon": "building",
+        "description": f"Comprehensive care in {name} by experienced specialists.",
+        "head_doctor": None,
+        "diseases_treated": [],
+        "surgeries_offered": [],
+        "features": ["Specialist consultation", "Diagnostics", "Treatment planning"],
+        "benefits": ["Expert care", "Modern facilities", "Patient-focused treatment"],
+        "image": "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=600",
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+def build_lab_test_includes(test_doc: dict) -> List[str]:
+    includes = test_doc.get("includes")
+    if isinstance(includes, list) and includes:
+        return includes
+    return [
+        f"{test_doc.get('test_name', 'Test')} sample collection",
+        "Laboratory analysis by certified technicians",
+        "Quality-checked digital report delivery",
+    ]
+
+def build_lab_test_price_breakup(test_doc: dict) -> dict:
+    existing = test_doc.get("price_breakup")
+    if isinstance(existing, dict) and existing:
+        return existing
+    total = float(test_doc.get("price") or 0)
+    if total <= 0:
+        return {"base_test_charge": 0, "sample_collection_charge": 0, "reporting_charge": 0, "total": 0}
+    base = round(total * 0.8, 2)
+    sample = round(total * 0.12, 2)
+    reporting = round(total - base - sample, 2)
+    return {
+        "base_test_charge": base,
+        "sample_collection_charge": sample,
+        "reporting_charge": reporting,
+        "total": round(total, 2),
+    }
+
+def enrich_lab_test(test_doc: dict) -> dict:
+    enriched = dict(test_doc)
+    enriched["includes"] = build_lab_test_includes(test_doc)
+    enriched["price_breakup"] = build_lab_test_price_breakup(test_doc)
+    return enriched
+
+async def insert_missing_documents(collection, documents: List[dict], unique_field: str) -> int:
+    inserted = 0
+    for doc in documents:
+        unique_value = doc.get(unique_field)
+        if not unique_value:
+            continue
+        existing = await collection.find_one({unique_field: unique_value}, {"_id": 1})
+        if existing:
+            continue
+        payload = dict(doc)
+        payload.setdefault("created_at", datetime.utcnow().isoformat())
+        await collection.insert_one(payload)
+        inserted += 1
+    return inserted
+
+async def ensure_operational_demo_users() -> int:
+    now = datetime.utcnow().isoformat()
+    demo_users = [
+        {
+            "name": "Hospital Administrator",
+            "email": "hospital.admin@nirmaya.com",
+            "password": "hospital123",
+            "role": "hospital_administrator",
+        },
+        {
+            "name": "Hospital Staff",
+            "email": "staff@nirmaya.com",
+            "password": "staff123",
+            "role": "staff",
+        },
+        {
+            "name": "Nurse Station",
+            "email": "nurse@nirmaya.com",
+            "password": "nurse123",
+            "role": "nurse",
+        },
+    ]
+    changes = 0
+    for demo in demo_users:
+        before = await users_collection.find_one({"email": demo["email"]}, {"_id": 1})
+        await users_collection.update_one(
+            {"email": demo["email"]},
+            {
+                "$set": {
+                    "name": demo["name"],
+                    "role": demo["role"],
+                    "password": hash_password(demo["password"]),
+                    "updated_at": now,
+                },
+                "$setOnInsert": {
+                    "id": str(uuid.uuid4()),
+                    "created_at": now,
+                    "profile_complete": True,
+                },
+            },
+            upsert=True,
+        )
+        if not before:
+            changes += 1
+    return changes
+
+async def sync_seed_catalog() -> dict:
+    summary = {
+        "departments_added": 0,
+        "doctors_added": 0,
+        "packages_added": 0,
+        "lab_tests_added": 0,
+        "beds_added": 0,
+        "ambulances_added": 0,
+        "demo_users_upserted": 0,
+    }
+
+    try:
+        from seeds.seed_data import (
+            DEPARTMENTS,
+            HEALTH_PACKAGES,
+            SAMPLE_AMBULANCES,
+            SAMPLE_BEDS,
+            SAMPLE_LAB_TESTS,
+            generate_doctors,
+        )
+    except Exception:
+        return summary
+
+    summary["departments_added"] = await insert_missing_documents(departments_collection, DEPARTMENTS, "slug")
+    summary["doctors_added"] = await insert_missing_documents(doctors_collection, generate_doctors(), "email")
+    summary["packages_added"] = await insert_missing_documents(health_packages_collection, HEALTH_PACKAGES, "name")
+    summary["lab_tests_added"] = await insert_missing_documents(lab_tests_collection, SAMPLE_LAB_TESTS, "test_name")
+    summary["beds_added"] = await insert_missing_documents(beds_collection, SAMPLE_BEDS, "bed_number")
+    summary["ambulances_added"] = await insert_missing_documents(ambulances_collection, SAMPLE_AMBULANCES, "vehicle_number")
+    summary["demo_users_upserted"] = await ensure_operational_demo_users()
+    return summary
+
 async def create_notification(user_id: str, title: str, message: str, notification_type: str, data: dict = None):
     notification = {
         "id": str(uuid.uuid4()),
@@ -333,13 +493,25 @@ async def health_check():
 @app.get("/api/departments")
 async def get_departments():
     departments = await departments_collection.find({}, {"_id": 0}).to_list(50)
-    return departments
+    if departments:
+        return departments
+
+    # Fallback for partially seeded databases: infer departments from doctors.
+    doctor_departments = await doctors_collection.distinct("department")
+    inferred = [default_department_from_name(name) for name in doctor_departments if name]
+    inferred.sort(key=lambda item: item["name"])
+    return inferred
 
 @app.get("/api/departments/{slug}")
 async def get_department(slug: str):
     department = await departments_collection.find_one({"slug": slug}, {"_id": 0})
     if not department:
-        raise HTTPException(status_code=404, detail="Department not found")
+        doctor_departments = await doctors_collection.distinct("department")
+        matched = next((name for name in doctor_departments if slugify(name) == slug), None)
+        if not matched:
+            raise HTTPException(status_code=404, detail="Department not found")
+        department = default_department_from_name(matched)
+        department["slug"] = slug
     
     # Get doctors for this department
     doctors = await doctors_collection.find({"department": department["name"]}, {"_id": 0, "password": 0}).to_list(50)
@@ -421,7 +593,7 @@ async def request_ambulance_service(
     )
     
     # Notify admins
-    admins = await users_collection.find({"role": "admin"}).to_list(10)
+    admins = await users_collection.find({"role": {"$in": ["admin", "hospital_administrator", "hospital_admin"]}}).to_list(20)
     for admin in admins:
         await create_notification(
             admin["id"],
@@ -443,7 +615,7 @@ async def request_ambulance_service(
 
 @app.get("/api/ambulances/requests")
 async def get_ambulance_requests(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") == "admin":
+    if has_any_role(current_user, ["admin", "hospital_administrator"]):
         requests = await ambulance_requests_collection.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
     else:
         requests = await ambulance_requests_collection.find({"user_id": current_user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(20)
@@ -455,7 +627,7 @@ async def update_ambulance_request_status(
     status: str = Form(...),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     request = await ambulance_requests_collection.find_one({"id": request_id})
@@ -550,7 +722,7 @@ async def login(credentials: UserLogin):
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    actual_role = user.get("role", role)
+    actual_role = normalize_role(user.get("role", role))
     token = create_token(user["id"], actual_role)
     
     user_response = {
@@ -568,15 +740,27 @@ async def login(credentials: UserLogin):
 @app.get("/api/auth/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
     user_data = {k: v for k, v in current_user.items() if k not in ["password", "_id"]}
+    user_data["role"] = normalize_role(user_data.get("role"))
     return user_data
 
 @app.put("/api/auth/profile")
 async def update_profile(update: UserUpdate, current_user: dict = Depends(get_current_user)):
     update_data = {k: v for k, v in update.dict().items() if v is not None}
-    if update_data:
-        update_data["profile_complete"] = True
-        await users_collection.update_one({"id": current_user["id"]}, {"$set": update_data})
-    updated = await users_collection.find_one({"id": current_user["id"]})
+    role = normalize_role(current_user.get("role"))
+    if role == "doctor":
+        allowed_fields = {"name", "phone"}
+        update_data = {k: v for k, v in update_data.items() if k in allowed_fields}
+        if update_data:
+            await doctors_collection.update_one({"id": current_user["id"]}, {"$set": update_data})
+        updated = await doctors_collection.find_one({"id": current_user["id"]})
+    else:
+        if update_data:
+            update_data["profile_complete"] = True
+            await users_collection.update_one({"id": current_user["id"]}, {"$set": update_data})
+        updated = await users_collection.find_one({"id": current_user["id"]})
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Profile not found")
     return {k: v for k, v in updated.items() if k not in ["password", "_id"]}
 
 # ==================== NOTIFICATIONS ====================
@@ -599,7 +783,7 @@ async def mark_all_notifications_read(current_user: dict = Depends(get_current_u
 @app.get("/api/doctors")
 async def get_doctors(department: Optional[str] = None):
     query = {} if not department else {"department": department}
-    doctors = await doctors_collection.find(query).to_list(100)
+    doctors = await doctors_collection.find(query).sort("name", 1).to_list(1000)
     return [{k: v for k, v in d.items() if k not in ["password", "_id"]} for d in doctors]
 
 @app.get("/api/doctors/{doctor_id}")
@@ -625,7 +809,7 @@ async def get_doctor(doctor_id: str):
 
 @app.post("/api/doctors")
 async def create_doctor(doctor: DoctorCreate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     existing = await doctors_collection.find_one({"email": doctor.email})
@@ -657,7 +841,7 @@ async def create_doctor(doctor: DoctorCreate, current_user: dict = Depends(get_c
 
 @app.put("/api/doctors/{doctor_id}")
 async def update_doctor(doctor_id: str, update: DoctorUpdate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "doctor"]:
+    if not has_any_role(current_user, ["admin", "doctor", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Access denied")
     
     update_data = {k: v for k, v in update.dict().items() if v is not None}
@@ -669,7 +853,7 @@ async def update_doctor(doctor_id: str, update: DoctorUpdate, current_user: dict
 
 @app.delete("/api/doctors/{doctor_id}")
 async def delete_doctor(doctor_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     await doctors_collection.delete_one({"id": doctor_id})
     return {"message": "Doctor deleted successfully"}
@@ -691,7 +875,7 @@ async def add_review(doctor_id: str, review: ReviewCreate, current_user: dict = 
 # ==================== APPOINTMENTS ROUTES ====================
 @app.get("/api/appointments")
 async def get_appointments(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") == "admin":
+    if has_any_role(current_user, ["admin", "hospital_administrator", "staff", "nurse"]):
         appointments = await appointments_collection.find().to_list(500)
     elif current_user.get("role") == "doctor":
         appointments = await appointments_collection.find({"doctor_id": current_user["id"]}).to_list(200)
@@ -829,7 +1013,7 @@ async def verify_payment(
 
 @app.get("/api/payments/history")
 async def get_payment_history(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") == "admin":
+    if has_any_role(current_user, ["admin", "hospital_administrator"]):
         payments = await payments_collection.find().sort("created_at", -1).to_list(500)
     else:
         payments = await payments_collection.find({"user_id": current_user["id"]}).sort("created_at", -1).to_list(100)
@@ -864,7 +1048,7 @@ async def simulate_payment(payment_id: str = Form(...), current_user: dict = Dep
 # ==================== INVENTORY MANAGEMENT ====================
 @app.get("/api/inventory")
 async def get_inventory(department: Optional[str] = None, low_stock: bool = False, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "staff", "doctor"]:
+    if not has_any_role(current_user, ["admin", "staff", "doctor", "nurse", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     query = {}
@@ -880,7 +1064,7 @@ async def get_inventory(department: Optional[str] = None, low_stock: bool = Fals
 
 @app.post("/api/inventory")
 async def add_inventory(item: InventoryCreate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "staff"]:
+    if not has_any_role(current_user, ["admin", "staff", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     item_id = str(uuid.uuid4())
@@ -896,7 +1080,7 @@ async def add_inventory(item: InventoryCreate, current_user: dict = Depends(get_
 
 @app.put("/api/inventory/{item_id}")
 async def update_inventory(item_id: str, update: InventoryUpdate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "staff"]:
+    if not has_any_role(current_user, ["admin", "staff", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     update_data = {k: v for k, v in update.dict().items() if v is not None}
@@ -907,7 +1091,7 @@ async def update_inventory(item_id: str, update: InventoryUpdate, current_user: 
     # Check if stock is low and notify
     item = await inventory_collection.find_one({"id": item_id})
     if item and item.get("quantity", 0) <= item.get("min_threshold", 10):
-        admins = await users_collection.find({"role": "admin"}).to_list(10)
+        admins = await users_collection.find({"role": {"$in": ["admin", "hospital_administrator", "hospital_admin"]}}).to_list(20)
         for admin in admins:
             await create_notification(admin["id"], "Low Stock Alert",
                 f"{item['item_name']} is running low. Current quantity: {item['quantity']} {item['unit']}",
@@ -917,7 +1101,7 @@ async def update_inventory(item_id: str, update: InventoryUpdate, current_user: 
 
 @app.post("/api/inventory/{item_id}/restock")
 async def restock_inventory(item_id: str, quantity: int = Form(...), current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "staff"]:
+    if not has_any_role(current_user, ["admin", "staff", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     item = await inventory_collection.find_one({"id": item_id})
@@ -934,7 +1118,7 @@ async def restock_inventory(item_id: str, quantity: int = Form(...), current_use
 
 @app.post("/api/inventory/{item_id}/use")
 async def use_inventory(item_id: str, quantity: int = Form(...), reason: str = Form(""), current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "staff", "doctor"]:
+    if not has_any_role(current_user, ["admin", "staff", "doctor", "nurse", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     item = await inventory_collection.find_one({"id": item_id})
@@ -954,7 +1138,7 @@ async def use_inventory(item_id: str, quantity: int = Form(...), reason: str = F
 
 @app.delete("/api/inventory/{item_id}")
 async def delete_inventory(item_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     await inventory_collection.delete_one({"id": item_id})
     return {"message": "Item deleted"}
@@ -962,7 +1146,7 @@ async def delete_inventory(item_id: str, current_user: dict = Depends(get_curren
 # ==================== SHIFT MANAGEMENT ====================
 @app.get("/api/shifts")
 async def get_shifts(date: Optional[str] = None, department: Optional[str] = None, staff_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "staff", "doctor"]:
+    if not has_any_role(current_user, ["admin", "staff", "doctor", "nurse", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     query = {}
@@ -978,7 +1162,7 @@ async def get_shifts(date: Optional[str] = None, department: Optional[str] = Non
 
 @app.post("/api/shifts")
 async def create_shift(shift: ShiftCreate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     # Check for conflicts
@@ -1009,7 +1193,7 @@ async def create_shift(shift: ShiftCreate, current_user: dict = Depends(get_curr
 
 @app.put("/api/shifts/{shift_id}")
 async def update_shift(shift_id: str, status: str = Form(...), current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "doctor"]:
+    if not has_any_role(current_user, ["admin", "doctor", "staff", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Access denied")
     
     await shifts_collection.update_one({"id": shift_id}, {"$set": {"status": status}})
@@ -1017,7 +1201,7 @@ async def update_shift(shift_id: str, status: str = Form(...), current_user: dic
 
 @app.delete("/api/shifts/{shift_id}")
 async def delete_shift(shift_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     shift = await shifts_collection.find_one({"id": shift_id})
@@ -1045,7 +1229,7 @@ async def get_health_package(package_id: str):
 
 @app.post("/api/health-packages")
 async def create_health_package(package: HealthPackageCreate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     package_id = str(uuid.uuid4())
@@ -1097,7 +1281,7 @@ async def request_ambulance(request: AmbulanceRequest, current_user: dict = Depe
     await ambulance_requests_collection.insert_one(request_doc)
     
     # Notify admins
-    admins = await users_collection.find({"role": "admin"}).to_list(10)
+    admins = await users_collection.find({"role": {"$in": ["admin", "hospital_administrator", "hospital_admin"]}}).to_list(20)
     for admin in admins:
         await create_notification(admin["id"], "🚑 Emergency Ambulance Request",
             f"Emergency request from {request.patient_name} at {request.pickup_address}",
@@ -1129,7 +1313,7 @@ async def request_ambulance(request: AmbulanceRequest, current_user: dict = Depe
 
 @app.get("/api/ambulance/requests")
 async def get_ambulance_requests(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") == "admin":
+    if has_any_role(current_user, ["admin", "hospital_administrator"]):
         requests = await ambulance_requests_collection.find().sort("created_at", -1).to_list(100)
     else:
         requests = await ambulance_requests_collection.find({"user_id": current_user["id"]}).sort("created_at", -1).to_list(20)
@@ -1137,7 +1321,7 @@ async def get_ambulance_requests(current_user: dict = Depends(get_current_user))
 
 @app.put("/api/ambulance/requests/{request_id}/status")
 async def update_ambulance_status(request_id: str, status: str = Form(...), current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     request = await ambulance_requests_collection.find_one({"id": request_id})
@@ -1212,11 +1396,11 @@ async def get_health_timeline(patient_id: str, current_user: dict = Depends(get_
 async def get_lab_tests(category: Optional[str] = None):
     query = {} if not category else {"category": category}
     tests = await lab_tests_collection.find(query).to_list(100)
-    return [serialize_doc(t) for t in tests]
+    return [enrich_lab_test(serialize_doc(t)) for t in tests]
 
 @app.post("/api/lab-tests")
 async def create_lab_test(test: LabTestCreate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     test_id = str(uuid.uuid4())
@@ -1255,7 +1439,7 @@ async def book_lab_test(booking: LabTestBooking, current_user: dict = Depends(ge
 
 @app.get("/api/lab-tests/bookings")
 async def get_lab_bookings(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") == "admin":
+    if has_any_role(current_user, ["admin", "staff", "nurse", "hospital_administrator"]):
         bookings = await db.lab_bookings.find().sort("created_at", -1).to_list(200)
     else:
         bookings = await db.lab_bookings.find({"user_id": current_user["id"]}).sort("created_at", -1).to_list(50)
@@ -1263,7 +1447,7 @@ async def get_lab_bookings(current_user: dict = Depends(get_current_user)):
 
 @app.put("/api/lab-tests/bookings/{booking_id}/result")
 async def upload_lab_result(booking_id: str, result_url: str = Form(...), notes: str = Form(""), current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "staff"]:
+    if not has_any_role(current_user, ["admin", "staff", "nurse", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     booking = await db.lab_bookings.find_one({"id": booking_id})
@@ -1316,7 +1500,7 @@ async def get_bed_availability():
 
 @app.post("/api/beds")
 async def create_bed(bed: BedCreate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "staff", "nurse", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     bed_id = str(uuid.uuid4())
@@ -1333,7 +1517,7 @@ async def create_bed(bed: BedCreate, current_user: dict = Depends(get_current_us
 
 @app.post("/api/beds/{bed_id}/admit")
 async def admit_patient(bed_id: str, patient_id: str = Form(...), patient_name: str = Form(...), current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "doctor"]:
+    if not has_any_role(current_user, ["admin", "staff", "nurse", "doctor", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Access denied")
     
     bed = await beds_collection.find_one({"id": bed_id})
@@ -1359,7 +1543,7 @@ async def admit_patient(bed_id: str, patient_id: str = Form(...), patient_name: 
 
 @app.post("/api/beds/{bed_id}/discharge")
 async def discharge_patient(bed_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "doctor"]:
+    if not has_any_role(current_user, ["admin", "staff", "nurse", "doctor", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Access denied")
     
     bed = await beds_collection.find_one({"id": bed_id})
@@ -1506,7 +1690,7 @@ async def get_equipment(category: Optional[str] = None, department: Optional[str
 
 @app.post("/api/equipment")
 async def add_equipment(equipment: EquipmentCreate, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") not in ["admin", "staff"]:
+    if not has_any_role(current_user, ["admin", "staff", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     equipment_id = str(uuid.uuid4())
@@ -1521,7 +1705,7 @@ async def add_equipment(equipment: EquipmentCreate, current_user: dict = Depends
 # ==================== REPORTS ====================
 @app.get("/api/reports")
 async def get_reports(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") in ["admin", "staff", "doctor"]:
+    if has_any_role(current_user, ["admin", "staff", "doctor", "nurse", "hospital_administrator"]):
         reports = await reports_collection.find().to_list(500)
     else:
         reports = await reports_collection.find({"patient_id": current_user["id"]}).to_list(100)
@@ -1536,7 +1720,7 @@ async def upload_report(
     file_url: str = Form(...),
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user.get("role") not in ["admin", "staff", "doctor"]:
+    if not has_any_role(current_user, ["admin", "staff", "doctor", "nurse", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
     
     report_id = str(uuid.uuid4())
@@ -1635,9 +1819,69 @@ async def get_doctor_analytics(current_user: dict = Depends(get_current_user)):
         "completion_rate": round((completed / total * 100) if total > 0 else 0, 1)
     }
 
+@app.get("/api/analytics/operations")
+async def get_operations_analytics(current_user: dict = Depends(get_current_user)):
+    if not has_any_role(current_user, ["admin", "hospital_administrator", "staff", "nurse", "doctor"]):
+        raise HTTPException(status_code=403, detail="Staff access required")
+
+    appointments = await appointments_collection.find().to_list(2000)
+    active_statuses = {"scheduled", "pending_payment", "pending", "confirmed", "in_progress"}
+    active_appointments = [a for a in appointments if (a.get("status") or "").lower() in active_statuses]
+    appointment_active_patients = {
+        a.get("patient_id")
+        for a in active_appointments
+        if a.get("patient_id")
+    }
+    appointment_patients_seen = {
+        a.get("patient_id")
+        for a in appointments
+        if a.get("patient_id")
+    }
+
+    registered_patients = await users_collection.find({"role": "patient"}, {"_id": 0, "id": 1}).to_list(5000)
+    registered_patient_ids = {p.get("id") for p in registered_patients if p.get("id")}
+
+    today = datetime.utcnow().date().isoformat()
+    today_appointments = len([a for a in appointments if a.get("date") == today])
+
+    beds = await beds_collection.find().to_list(500)
+    available_beds = len([b for b in beds if (b.get("status") or "").lower() == "available"])
+    occupied_beds = len(beds) - available_beds
+    bed_patients = {
+        (b.get("current_patient") or {}).get("id")
+        for b in beds
+        if isinstance(b.get("current_patient"), dict) and (b.get("status") or "").lower() == "occupied"
+    }
+
+    # "active patients" and "assigned patients" should align with what operations users see in patient lists.
+    active_patient_ids = set(registered_patient_ids) | set(appointment_active_patients) | set(bed_patients)
+    active_patient_ids.discard(None)
+    total_patients_seen = set(registered_patient_ids) | set(appointment_patients_seen) | set(bed_patients)
+    total_patients_seen.discard(None)
+
+    departments_count = await departments_collection.count_documents({})
+    if departments_count == 0:
+        departments_count = len(await doctors_collection.distinct("department"))
+
+    total_doctors = await doctors_collection.count_documents({})
+    pending_lab_results = await db.lab_bookings.count_documents({"result_status": {"$ne": "completed"}})
+
+    return {
+        "active_patients": len(active_patient_ids),
+        "assigned_patients": len(active_patient_ids),
+        "total_patients_seen": len(total_patients_seen),
+        "today_appointments": today_appointments,
+        "total_doctors": total_doctors,
+        "total_departments": departments_count,
+        "available_beds": available_beds,
+        "occupied_beds": occupied_beds,
+        "total_beds": len(beds),
+        "pending_lab_results": pending_lab_results,
+    }
+
 @app.get("/api/analytics/admin")
 async def get_admin_analytics(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     total_users = await users_collection.count_documents({})
@@ -1682,14 +1926,21 @@ async def get_admin_analytics(current_user: dict = Depends(get_current_user)):
 # ==================== USERS MANAGEMENT ====================
 @app.get("/api/users")
 async def get_users(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     users = await users_collection.find().to_list(500)
     return [{k: v for k, v in u.items() if k not in ["password", "_id"]} for u in users]
 
+@app.get("/api/patients")
+async def get_patients(current_user: dict = Depends(get_current_user)):
+    if not has_any_role(current_user, ["admin", "hospital_administrator", "staff", "nurse", "doctor"]):
+        raise HTTPException(status_code=403, detail="Staff access required")
+    patients = await users_collection.find({"role": "patient"}).to_list(1000)
+    return [{k: v for k, v in p.items() if k not in ["password", "_id"]} for p in patients]
+
 @app.delete("/api/users/{user_id}")
 async def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
+    if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     user = await users_collection.find_one({"id": user_id})
     if user and user.get("role") == "admin":
@@ -1859,7 +2110,12 @@ async def seed_data():
             item["usage_history"] = []
         await inventory_collection.insert_many(inventory_data)
     
-    return {"message": "Data seeded successfully"}
+    sync_summary = await sync_seed_catalog()
+
+    return {
+        "message": "Data seeded successfully",
+        "sync": sync_summary
+    }
 
 # ==================== STRIPE PAYMENT ROUTES ====================
 # Initialize Stripe

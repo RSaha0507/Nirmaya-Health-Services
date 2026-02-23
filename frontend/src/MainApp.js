@@ -22,7 +22,27 @@ import {
 } from './AdditionalPages';
 import './App.css';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL + '/api' || '/api';
+const API_URL = process.env.REACT_APP_BACKEND_URL
+  ? `${process.env.REACT_APP_BACKEND_URL}/api`
+  : '/api';
+
+const normalizeRole = (role = '') => {
+  const normalized = String(role).toLowerCase();
+  if (normalized === 'hospital_admin') return 'hospital_administrator';
+  return normalized;
+};
+
+const hasRole = (user, roles) => {
+  const currentRole = normalizeRole(user?.role);
+  return roles.map(normalizeRole).includes(currentRole);
+};
+
+const getPrimaryDashboardRoute = (user) => {
+  if (!user) return 'home';
+  if (hasRole(user, ['admin', 'hospital_administrator', 'staff', 'nurse'])) return 'operations';
+  if (hasRole(user, ['doctor'])) return 'doctor-portal';
+  return 'dashboard';
+};
 
 // API Helper
 const api = {
@@ -76,6 +96,10 @@ const Navbar = ({ user, onLogout, navigateTo, currentPage }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
   const departments = ['Cardiology', 'Neurology', 'Oncology', 'Orthopedics', 'Pediatrics', 'Dermatology'];
+  const canManageOperations = hasRole(user, ['admin', 'hospital_administrator', 'staff', 'nurse']);
+  const isDoctor = hasRole(user, ['doctor']);
+  const isPatient = hasRole(user, ['patient']);
+
   const services = [
     { name: 'Find a Doctor', page: 'doctors', icon: Stethoscope },
     { name: 'Departments', page: 'departments', icon: Building2 },
@@ -87,6 +111,9 @@ const Navbar = ({ user, onLogout, navigateTo, currentPage }) => {
     { name: 'Equipment', page: 'equipment', icon: Hospital },
     { name: 'Medical Reports', page: 'reports', icon: FileText },
   ];
+  if (canManageOperations) {
+    services.push({ name: 'Inventory', page: 'inventory', icon: Package });
+  }
 
   return (
     <header className="bg-white shadow-md fixed w-full top-0 z-50" data-testid="navbar">
@@ -125,9 +152,11 @@ const Navbar = ({ user, onLogout, navigateTo, currentPage }) => {
         <div className="hidden lg:flex items-center gap-4">
           {user ? (
             <>
-              {user.role === 'admin' && <button onClick={() => navigateTo('admin')} className="text-teal-600 font-medium hover:text-teal-700" data-testid="nav-admin">Admin</button>}
-              {user.role === 'doctor' && <button onClick={() => navigateTo('doctor-portal')} className="text-teal-600 font-medium hover:text-teal-700" data-testid="nav-portal">My Portal</button>}
-              {user.role === 'patient' && <button onClick={() => navigateTo('dashboard')} className="text-teal-600 font-medium hover:text-teal-700" data-testid="nav-dashboard">Dashboard</button>}
+              {hasRole(user, ['admin']) && <button onClick={() => navigateTo('admin')} className="text-teal-600 font-medium hover:text-teal-700" data-testid="nav-admin">Admin</button>}
+              {canManageOperations && <button onClick={() => navigateTo('operations')} className="text-teal-600 font-medium hover:text-teal-700" data-testid="nav-operations">Operations</button>}
+              {isDoctor && <button onClick={() => navigateTo('doctor-portal')} className="text-teal-600 font-medium hover:text-teal-700" data-testid="nav-portal">My Portal</button>}
+              {isPatient && <button onClick={() => navigateTo('dashboard')} className="text-teal-600 font-medium hover:text-teal-700" data-testid="nav-dashboard">Dashboard</button>}
+              <button onClick={() => navigateTo('profile')} className="text-gray-600 hover:text-teal-600 font-medium" data-testid="nav-profile">Profile</button>
               <button onClick={() => navigateTo('messages')} className="relative p-2 text-gray-600 hover:text-teal-600" data-testid="nav-messages">
                 <MessageSquare size={20} />
               </button>
@@ -160,7 +189,13 @@ const Navbar = ({ user, onLogout, navigateTo, currentPage }) => {
           <button onClick={() => { navigateTo('equipment'); setMobileMenuOpen(false); }} className="block w-full text-left py-2 text-gray-700">Equipment</button>
           {user ? (
             <>
-              <button onClick={() => { navigateTo('dashboard'); setMobileMenuOpen(false); }} className="block w-full text-left py-2 text-teal-600">Dashboard</button>
+              <button
+                onClick={() => { navigateTo(getPrimaryDashboardRoute(user)); setMobileMenuOpen(false); }}
+                className="block w-full text-left py-2 text-teal-600"
+              >
+                {canManageOperations ? 'Operations' : isDoctor ? 'My Portal' : 'Dashboard'}
+              </button>
+              <button onClick={() => { navigateTo('profile'); setMobileMenuOpen(false); }} className="block w-full text-left py-2 text-gray-700">Profile</button>
               <button onClick={() => { onLogout(); setMobileMenuOpen(false); }} className="block w-full text-left py-2 text-red-500">Logout</button>
             </>
           ) : (
@@ -366,7 +401,7 @@ const LoginPage = ({ onLogin, navigateTo, showToast }) => {
       localStorage.setItem('token', data.token);
       onLogin(data.user);
       showToast('Login successful!', 'success');
-      navigateTo('home');
+      navigateTo(getPrimaryDashboardRoute(data.user));
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -1407,6 +1442,241 @@ const AdminDashboard = ({ showToast, navigateTo }) => {
   );
 };
 
+// Operations Dashboard
+const OperationsDashboard = ({ user, navigateTo, showToast }) => {
+  const [analytics, setAnalytics] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const data = await api.get('/analytics/operations');
+      setAnalytics(data);
+    } catch (err) {
+      showToast('Failed to load operations data', 'error');
+    }
+    setLoading(false);
+  };
+
+  if (loading) return <div className="pt-24"><Spinner /></div>;
+
+  const cards = [
+    { label: 'Assigned Patients', value: analytics?.assigned_patients || 0, icon: UserCheck },
+    { label: 'Active Patients', value: analytics?.active_patients || 0, icon: Users },
+    { label: 'Today Appointments', value: analytics?.today_appointments || 0, icon: Calendar },
+    { label: 'Available Beds', value: analytics?.available_beds || 0, icon: Bed },
+    { label: 'Total Doctors', value: analytics?.total_doctors || 0, icon: Stethoscope },
+    { label: 'Departments', value: analytics?.total_departments || 0, icon: Building2 },
+  ];
+
+  return (
+    <div className="py-24 bg-gray-50 min-h-screen" data-testid="operations-dashboard">
+      <div className="container mx-auto px-4">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-800">Operations Dashboard</h1>
+          <p className="text-gray-600">Hello, {user?.name}. Monitor core hospital operations in one place.</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+          {cards.map((card) => (
+            <div key={card.label} className="bg-white p-6 rounded-xl shadow-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-500">{card.label}</p>
+                  <p className="text-3xl font-bold text-gray-800">{card.value}</p>
+                </div>
+                <card.icon className="text-teal-500" size={34} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-xl shadow-lg p-6">
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <button onClick={() => navigateTo('beds')} className="bg-teal-500 text-white px-4 py-3 rounded-lg hover:bg-teal-600 transition">
+              Manage Beds
+            </button>
+            <button onClick={() => navigateTo('inventory')} className="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 transition">
+              View Inventory
+            </button>
+            <button onClick={() => navigateTo('reports')} className="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 transition">
+              Medical Reports
+            </button>
+            <button onClick={() => navigateTo('departments')} className="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-200 transition">
+              Departments
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Profile Page
+const ProfilePage = ({ user, onUserUpdate, showToast }) => {
+  const [profile, setProfile] = useState(null);
+  const [form, setForm] = useState({
+    name: '',
+    phone: '',
+    address: '',
+    date_of_birth: '',
+    blood_group: '',
+    emergency_contact: '',
+    allergies: '',
+    chronic_conditions: '',
+  });
+  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const loadProfile = async () => {
+    try {
+      const data = await api.get('/auth/me');
+      setProfile(data);
+      setForm({
+        name: data.name || '',
+        phone: data.phone || '',
+        address: data.address || '',
+        date_of_birth: data.date_of_birth || '',
+        blood_group: data.blood_group || '',
+        emergency_contact: data.emergency_contact || '',
+        allergies: Array.isArray(data.allergies) ? data.allergies.join(', ') : '',
+        chronic_conditions: Array.isArray(data.chronic_conditions) ? data.chronic_conditions.join(', ') : '',
+      });
+    } catch (err) {
+      showToast('Failed to load profile', 'error');
+    }
+    setLoading(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        name: form.name,
+        phone: form.phone,
+      };
+
+      if (!hasRole(user, ['doctor'])) {
+        payload.address = form.address || null;
+        payload.date_of_birth = form.date_of_birth || null;
+        payload.blood_group = form.blood_group || null;
+        payload.emergency_contact = form.emergency_contact || null;
+        payload.allergies = form.allergies ? form.allergies.split(',').map(item => item.trim()).filter(Boolean) : [];
+        payload.chronic_conditions = form.chronic_conditions ? form.chronic_conditions.split(',').map(item => item.trim()).filter(Boolean) : [];
+      }
+
+      const updated = await api.put('/auth/profile', payload);
+      setProfile(updated);
+      onUserUpdate(updated);
+      setIsEditing(false);
+      showToast('Profile updated successfully', 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to update profile', 'error');
+    }
+    setSaving(false);
+  };
+
+  if (loading) return <div className="pt-24"><Spinner /></div>;
+
+  const displayValue = (value) => (value ? value : 'Not provided');
+
+  return (
+    <div className="py-24 bg-gray-50 min-h-screen" data-testid="profile-page">
+      <div className="container mx-auto px-4 max-w-4xl">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800">My Profile</h1>
+            <p className="text-gray-600">View your submitted details. Edit only when needed.</p>
+          </div>
+          {!isEditing ? (
+            <button onClick={() => setIsEditing(true)} className="bg-teal-500 text-white px-6 py-2 rounded-lg hover:bg-teal-600 transition">
+              Edit Profile
+            </button>
+          ) : (
+            <div className="flex gap-3">
+              <button onClick={() => setIsEditing(false)} className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition">
+                Cancel
+              </button>
+              <button onClick={handleSave} disabled={saving} className="bg-teal-500 text-white px-6 py-2 rounded-lg hover:bg-teal-600 transition disabled:opacity-50">
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-lg p-6 md:p-8">
+          {!isEditing ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div><p className="text-sm text-gray-500">Name</p><p className="font-semibold text-gray-800">{displayValue(profile?.name)}</p></div>
+              <div><p className="text-sm text-gray-500">Email</p><p className="font-semibold text-gray-800">{displayValue(profile?.email)}</p></div>
+              <div><p className="text-sm text-gray-500">Role</p><p className="font-semibold text-gray-800">{displayValue(profile?.role)}</p></div>
+              <div><p className="text-sm text-gray-500">Phone</p><p className="font-semibold text-gray-800">{displayValue(profile?.phone)}</p></div>
+              {!hasRole(user, ['doctor']) && (
+                <>
+                  <div><p className="text-sm text-gray-500">Address</p><p className="font-semibold text-gray-800">{displayValue(profile?.address)}</p></div>
+                  <div><p className="text-sm text-gray-500">Date of Birth</p><p className="font-semibold text-gray-800">{displayValue(profile?.date_of_birth)}</p></div>
+                  <div><p className="text-sm text-gray-500">Blood Group</p><p className="font-semibold text-gray-800">{displayValue(profile?.blood_group)}</p></div>
+                  <div><p className="text-sm text-gray-500">Emergency Contact</p><p className="font-semibold text-gray-800">{displayValue(profile?.emergency_contact)}</p></div>
+                  <div><p className="text-sm text-gray-500">Allergies</p><p className="font-semibold text-gray-800">{displayValue(Array.isArray(profile?.allergies) ? profile.allergies.join(', ') : '')}</p></div>
+                  <div><p className="text-sm text-gray-500">Chronic Conditions</p><p className="font-semibold text-gray-800">{displayValue(Array.isArray(profile?.chronic_conditions) ? profile.chronic_conditions.join(', ') : '')}</p></div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg" />
+              </div>
+              {!hasRole(user, ['doctor']) && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
+                    <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Date of Birth</label>
+                    <input type="date" value={form.date_of_birth} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Blood Group</label>
+                    <input value={form.blood_group} onChange={(e) => setForm({ ...form, blood_group: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Emergency Contact</label>
+                    <input value={form.emergency_contact} onChange={(e) => setForm({ ...form, emergency_contact: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Allergies (comma separated)</label>
+                    <input value={form.allergies} onChange={(e) => setForm({ ...form, allergies: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Chronic Conditions (comma separated)</label>
+                    <input value={form.chronic_conditions} onChange={(e) => setForm({ ...form, chronic_conditions: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg" />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Messages Page
 const MessagesPage = ({ user, showToast, pageParams }) => {
   const [conversations, setConversations] = useState([]);
@@ -1603,8 +1873,8 @@ const ReportsPage = ({ user, showToast }) => {
 
   const loadPatients = async () => {
     try {
-      const data = await api.get('/users');
-      setPatients(data.filter(u => u.role === 'patient'));
+      const data = await api.get('/patients');
+      setPatients(data);
     } catch (err) {
       console.error(err);
     }
@@ -1865,7 +2135,7 @@ const App = () => {
     if (token) {
       try {
         const userData = await api.get('/auth/me');
-        setUser(userData);
+        setUser({ ...userData, role: normalizeRole(userData?.role) });
       } catch (err) {
         localStorage.removeItem('token');
       }
@@ -1906,7 +2176,15 @@ const App = () => {
   };
 
   const handleLogin = (userData) => {
-    setUser(userData);
+    setUser({ ...userData, role: normalizeRole(userData?.role) });
+  };
+
+  const handleUserUpdate = (updatedUser) => {
+    setUser((current) => ({
+      ...current,
+      ...updatedUser,
+      role: normalizeRole(updatedUser?.role || current?.role),
+    }));
   };
 
   if (loading) return <div className="flex items-center justify-center h-screen"><Spinner /></div>;
@@ -1920,14 +2198,30 @@ const App = () => {
       case 'doctors': return <DoctorsPage navigateTo={navigateTo} showToast={showToast} pageParams={pageParams} />;
       case 'appointments': return <AppointmentsPage user={user} navigateTo={navigateTo} showToast={showToast} pageParams={pageParams} />;
       case 'equipment': return <EquipmentPage showToast={showToast} />;
-      case 'dashboard': return <PatientDashboard user={user} navigateTo={navigateTo} showToast={showToast} />;
+      case 'dashboard':
+        if (!user) return <LoginPage onLogin={handleLogin} navigateTo={navigateTo} showToast={showToast} />;
+        if (hasRole(user, ['admin', 'hospital_administrator', 'staff', 'nurse'])) {
+          return <OperationsDashboard user={user} navigateTo={navigateTo} showToast={showToast} />;
+        }
+        if (hasRole(user, ['doctor'])) {
+          return <DoctorPortal user={user} navigateTo={navigateTo} showToast={showToast} />;
+        }
+        return <PatientDashboard user={user} navigateTo={navigateTo} showToast={showToast} />;
       case 'doctor-portal': return <DoctorPortal user={user} navigateTo={navigateTo} showToast={showToast} />;
       case 'admin': return <AdminDashboard showToast={showToast} navigateTo={navigateTo} />;
+      case 'operations':
+        if (!user || !hasRole(user, ['admin', 'hospital_administrator', 'staff', 'nurse', 'doctor'])) {
+          return <LoginPage onLogin={handleLogin} navigateTo={navigateTo} showToast={showToast} />;
+        }
+        return <OperationsDashboard user={user} navigateTo={navigateTo} showToast={showToast} />;
+      case 'profile':
+        if (!user) return <LoginPage onLogin={handleLogin} navigateTo={navigateTo} showToast={showToast} />;
+        return <ProfilePage user={user} onUserUpdate={handleUserUpdate} showToast={showToast} />;
       case 'messages': return <MessagesPage user={user} showToast={showToast} pageParams={pageParams} />;
       case 'reports': return <ReportsPage user={user} showToast={showToast} />;
       case 'departments': return <DepartmentsPage navigateTo={navigateTo} showToast={showToast} />;
       case 'health-packages': return <HealthPackagesPage user={user} navigateTo={navigateTo} showToast={showToast} />;
-      case 'beds': return <BedAvailabilityPage showToast={showToast} />;
+      case 'beds': return <BedAvailabilityPage user={user} showToast={showToast} />;
       case 'lab-tests': return <LabTestsPage user={user} navigateTo={navigateTo} showToast={showToast} />;
       case 'ambulance': return <AmbulanceServicePage user={user} navigateTo={navigateTo} showToast={showToast} />;
       case 'inventory': return <InventoryPage user={user} showToast={showToast} />;

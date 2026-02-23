@@ -1,4 +1,4 @@
-// Additional Pages for Nirmaya Health Services
+﻿// Additional Pages for Nirmaya Health Services
 import React, { useState, useEffect } from 'react';
 import {
   HeartPulse, Activity, Users, Calendar, Clock, MapPin, Phone, 
@@ -7,7 +7,20 @@ import {
   Syringe, Pill, Shield, Award, ArrowRight, CheckCircle, CreditCard, Loader
 } from 'lucide-react';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL + '/api' || '/api';
+const API_URL = process.env.REACT_APP_BACKEND_URL
+  ? `${process.env.REACT_APP_BACKEND_URL}/api`
+  : '/api';
+
+const normalizeRole = (role = '') => {
+  const normalized = String(role).toLowerCase();
+  if (normalized === 'hospital_admin') return 'hospital_administrator';
+  return normalized;
+};
+
+const hasRole = (user, roles) => {
+  const currentRole = normalizeRole(user?.role);
+  return roles.map(normalizeRole).includes(currentRole);
+};
 
 const api = {
   async request(endpoint, options = {}) {
@@ -256,11 +269,11 @@ export const DepartmentsPage = ({ navigateTo, showToast }) => {
                         <div className="flex items-center gap-2 mt-2">
                           {pkg.discounted_price ? (
                             <>
-                              <span className="text-lg font-bold text-teal-600">₹{pkg.discounted_price}</span>
-                              <span className="text-sm text-gray-400 line-through">₹{pkg.price}</span>
+                              <span className="text-lg font-bold text-teal-600">â‚¹{pkg.discounted_price}</span>
+                              <span className="text-sm text-gray-400 line-through">â‚¹{pkg.price}</span>
                             </>
                           ) : (
-                            <span className="text-lg font-bold text-teal-600">₹{pkg.price}</span>
+                            <span className="text-lg font-bold text-teal-600">â‚¹{pkg.price}</span>
                           )}
                         </div>
                         <button
@@ -410,11 +423,11 @@ export const HealthPackagesPage = ({ user, navigateTo, showToast }) => {
                   <div>
                     {pkg.discounted_price ? (
                       <>
-                        <span className="text-2xl font-bold text-teal-600">₹{pkg.discounted_price}</span>
-                        <span className="text-gray-400 line-through ml-2">₹{pkg.price}</span>
+                        <span className="text-2xl font-bold text-teal-600">â‚¹{pkg.discounted_price}</span>
+                        <span className="text-gray-400 line-through ml-2">â‚¹{pkg.price}</span>
                       </>
                     ) : (
-                      <span className="text-2xl font-bold text-teal-600">₹{pkg.price}</span>
+                      <span className="text-2xl font-bold text-teal-600">â‚¹{pkg.price}</span>
                     )}
                   </div>
                   <button
@@ -473,7 +486,7 @@ export const HealthPackagesPage = ({ user, navigateTo, showToast }) => {
               <div className="flex items-center justify-between pt-4 border-t">
                 <div>
                   <span className="text-sm text-gray-500">Total:</span>
-                  <span className="text-2xl font-bold text-teal-600 ml-2">₹{selectedPkg.discounted_price || selectedPkg.price}</span>
+                  <span className="text-2xl font-bold text-teal-600 ml-2">â‚¹{selectedPkg.discounted_price || selectedPkg.price}</span>
                 </div>
                 <div className="flex gap-3">
                   <button onClick={() => setSelectedPkg(null)} className="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
@@ -485,7 +498,7 @@ export const HealthPackagesPage = ({ user, navigateTo, showToast }) => {
                     {processing ? (
                       <><Loader className="animate-spin" size={16} /> Processing...</>
                     ) : (
-                      <><CreditCard size={16} /> Pay ₹{selectedPkg.discounted_price || selectedPkg.price}</>
+                      <><CreditCard size={16} /> Pay â‚¹{selectedPkg.discounted_price || selectedPkg.price}</>
                     )}
                   </button>
                 </div>
@@ -499,11 +512,16 @@ export const HealthPackagesPage = ({ user, navigateTo, showToast }) => {
 };
 
 // ==================== BED AVAILABILITY PAGE ====================
-export const BedAvailabilityPage = ({ showToast }) => {
+export const BedAvailabilityPage = ({ user, showToast }) => {
   const [beds, setBeds] = useState([]);
   const [availability, setAvailability] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedWard, setSelectedWard] = useState('');
+  const [selectedBed, setSelectedBed] = useState(null);
+  const [admitForm, setAdmitForm] = useState({ patientId: '', patientName: '' });
+  const [actionBedId, setActionBedId] = useState(null);
+
+  const canManageBeds = hasRole(user, ['admin', 'staff', 'nurse', 'hospital_administrator']);
 
   useEffect(() => {
     loadData();
@@ -523,6 +541,49 @@ export const BedAvailabilityPage = ({ showToast }) => {
     setLoading(false);
   };
 
+  const openAdmitModal = (bed) => {
+    setSelectedBed(bed);
+    setAdmitForm({ patientId: '', patientName: '' });
+  };
+
+  const closeAdmitModal = () => {
+    setSelectedBed(null);
+    setAdmitForm({ patientId: '', patientName: '' });
+  };
+
+  const handleAdmit = async () => {
+    if (!admitForm.patientId.trim() || !admitForm.patientName.trim()) {
+      showToast('Patient ID and name are required', 'error');
+      return;
+    }
+    setActionBedId(selectedBed.id);
+    try {
+      const formData = new FormData();
+      formData.append('patient_id', admitForm.patientId.trim());
+      formData.append('patient_name', admitForm.patientName.trim());
+      await api.postForm(`/beds/${selectedBed.id}/admit`, formData);
+      showToast('Patient admitted successfully', 'success');
+      closeAdmitModal();
+      await loadData();
+    } catch (err) {
+      showToast(err.message || 'Failed to admit patient', 'error');
+    }
+    setActionBedId(null);
+  };
+
+  const handleDischarge = async (bed) => {
+    setActionBedId(bed.id);
+    try {
+      const formData = new FormData();
+      await api.postForm(`/beds/${bed.id}/discharge`, formData);
+      showToast('Patient discharged successfully', 'success');
+      await loadData();
+    } catch (err) {
+      showToast(err.message || 'Failed to discharge patient', 'error');
+    }
+    setActionBedId(null);
+  };
+
   const wards = Object.keys(availability);
   const filteredBeds = selectedWard ? beds.filter(b => b.ward === selectedWard) : beds;
 
@@ -535,6 +596,13 @@ export const BedAvailabilityPage = ({ showToast }) => {
           <h1 className="text-4xl font-bold text-gray-800 mb-4">Bed Availability</h1>
           <p className="text-gray-600">Real-time hospital bed availability across all wards</p>
         </div>
+
+        {canManageBeds && (
+          <div className="bg-teal-50 border border-teal-100 text-teal-700 rounded-xl p-4 mb-8">
+            <p className="font-medium">Bed management enabled</p>
+            <p className="text-sm">You can admit and discharge patients directly from this section.</p>
+          </div>
+        )}
 
         {/* Ward Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-10">
@@ -583,7 +651,28 @@ export const BedAvailabilityPage = ({ showToast }) => {
                 <h4 className="font-semibold text-gray-800">{bed.bed_number}</h4>
                 <p className="text-xs text-gray-500">{bed.ward}</p>
                 <p className="text-xs text-gray-500">{bed.bed_type}</p>
-                <p className="text-sm font-medium text-teal-600 mt-2">₹{bed.price_per_day}/day</p>
+                <p className="text-sm font-medium text-teal-600 mt-2">INR {bed.price_per_day}/day</p>
+                {canManageBeds && (
+                  <div className="mt-3">
+                    {bed.status === 'available' ? (
+                      <button
+                        onClick={() => openAdmitModal(bed)}
+                        disabled={actionBedId === bed.id}
+                        className="w-full text-xs bg-teal-500 text-white py-2 rounded-lg hover:bg-teal-600 disabled:opacity-50"
+                      >
+                        {actionBedId === bed.id ? 'Admitting...' : 'Admit'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleDischarge(bed)}
+                        disabled={actionBedId === bed.id}
+                        className="w-full text-xs bg-amber-500 text-white py-2 rounded-lg hover:bg-amber-600 disabled:opacity-50"
+                      >
+                        {actionBedId === bed.id ? 'Discharging...' : 'Discharge'}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -596,6 +685,51 @@ export const BedAvailabilityPage = ({ showToast }) => {
           )}
         </div>
       </div>
+
+      {selectedBed && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={closeAdmitModal}>
+          <div className="bg-white rounded-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Admit Patient</h2>
+            <p className="text-sm text-gray-500 mb-6">
+              Bed: {selectedBed.bed_number} | Ward: {selectedBed.ward}
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Patient ID</label>
+                <input
+                  type="text"
+                  value={admitForm.patientId}
+                  onChange={(e) => setAdmitForm({ ...admitForm, patientId: e.target.value })}
+                  className="w-full p-3 border border-gray-300 rounded-lg"
+                  placeholder="e.g., PAT-1001"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Patient Name</label>
+                <input
+                  type="text"
+                  value={admitForm.patientName}
+                  onChange={(e) => setAdmitForm({ ...admitForm, patientName: e.target.value })}
+                  className="w-full p-3 border border-gray-300 rounded-lg"
+                  placeholder="Patient full name"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={closeAdmitModal} className="flex-1 py-3 border border-gray-300 rounded-lg hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleAdmit}
+                disabled={actionBedId === selectedBed.id}
+                className="flex-1 bg-teal-500 text-white py-3 rounded-lg hover:bg-teal-600 disabled:opacity-50"
+              >
+                {actionBedId === selectedBed.id ? 'Saving...' : 'Confirm Admit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -606,12 +740,11 @@ export const LabTestsPage = ({ user, navigateTo, showToast }) => {
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState('');
   const [selectedTest, setSelectedTest] = useState(null);
+  const [showBookingForm, setShowBookingForm] = useState(false);
   const [bookingForm, setBookingForm] = useState({ date: '', time: '', notes: '' });
-
   useEffect(() => {
     loadTests();
   }, []);
-
   const loadTests = async () => {
     try {
       const data = await api.get('/lab-tests');
@@ -621,14 +754,39 @@ export const LabTestsPage = ({ user, navigateTo, showToast }) => {
     }
     setLoading(false);
   };
-
   const categories = [...new Set(tests.map(t => t.category))];
   const filtered = category ? tests.filter(t => t.category === category) : tests;
-
+  const getTestIncludes = (test) => {
+    if (Array.isArray(test?.includes) && test.includes.length > 0) {
+      return test.includes;
+    }
+    return [
+      `${test?.test_name || 'Diagnostic'} sample collection`,
+      'Laboratory analysis by certified technicians',
+      'Quality-checked digital report delivery',
+    ];
+  };
+  const getPriceBreakup = (test) => {
+    const breakup = test?.price_breakup;
+    if (breakup && typeof breakup === 'object') {
+      return breakup;
+    }
+    const total = Number(test?.price || 0);
+    return {
+      base_test_charge: Number((total * 0.8).toFixed(2)),
+      sample_collection_charge: Number((total * 0.12).toFixed(2)),
+      reporting_charge: Number((total * 0.08).toFixed(2)),
+      total,
+    };
+  };
   const handleBook = async () => {
     if (!user) {
       showToast('Please login to book a test', 'error');
       navigateTo('login');
+      return;
+    }
+    if (!bookingForm.date || !bookingForm.time) {
+      showToast('Please select preferred date and time', 'error');
       return;
     }
     try {
@@ -640,14 +798,13 @@ export const LabTestsPage = ({ user, navigateTo, showToast }) => {
       });
       showToast('Test booked successfully!', 'success');
       setSelectedTest(null);
+      setShowBookingForm(false);
       setBookingForm({ date: '', time: '', notes: '' });
     } catch (err) {
       showToast('Failed to book test', 'error');
     }
   };
-
   if (loading) return <div className="pt-24"><Spinner /></div>;
-
   return (
     <div className="py-24 bg-gray-50 min-h-screen">
       <div className="container mx-auto px-4">
@@ -655,8 +812,6 @@ export const LabTestsPage = ({ user, navigateTo, showToast }) => {
           <h1 className="text-4xl font-bold text-gray-800 mb-4">Lab Tests</h1>
           <p className="text-gray-600">Book diagnostic tests with accurate results and quick turnaround</p>
         </div>
-
-        {/* Category Filters */}
         <div className="flex flex-wrap justify-center gap-3 mb-10">
           <button
             onClick={() => setCategory('')}
@@ -674,11 +829,16 @@ export const LabTestsPage = ({ user, navigateTo, showToast }) => {
             </button>
           ))}
         </div>
-
-        {/* Tests Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map(test => (
-            <div key={test.id} className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition">
+            <div
+              key={test.id}
+              className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition cursor-pointer"
+              onClick={() => {
+                setSelectedTest(test);
+                setShowBookingForm(false);
+              }}
+            >
               <div className="flex items-start justify-between mb-4">
                 <div className="bg-teal-100 p-3 rounded-lg">
                   <TestTube className="text-teal-600" size={24} />
@@ -695,67 +855,155 @@ export const LabTestsPage = ({ user, navigateTo, showToast }) => {
                   <AlertCircle size={12} className="inline mr-1" /> {test.preparation}
                 </p>
               )}
-              <div className="flex items-center justify-between pt-4 border-t">
-                <span className="text-xl font-bold text-teal-600">₹{test.price}</span>
-                <button
-                  onClick={() => setSelectedTest(test)}
-                  className="bg-teal-500 text-white px-4 py-2 rounded-lg hover:bg-teal-600 transition"
-                >
-                  Book Test
-                </button>
+              <div className="flex items-center justify-between gap-2 pt-4 border-t">
+                <span className="text-xl font-bold text-teal-600">INR {test.price}</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedTest(test);
+                      setShowBookingForm(false);
+                    }}
+                    className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-200 transition text-sm"
+                  >
+                    View Details
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedTest(test);
+                      setShowBookingForm(true);
+                    }}
+                    className="bg-teal-500 text-white px-3 py-2 rounded-lg hover:bg-teal-600 transition text-sm"
+                  >
+                    Book
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       </div>
-
-      {/* Booking Modal */}
       {selectedTest && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedTest(null)}>
-          <div className="bg-white rounded-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Book {selectedTest.test_name}</h2>
-            <p className="text-gray-500 mb-6">₹{selectedTest.price} • {selectedTest.duration}</p>
-            <div className="space-y-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Date</label>
-                <input
-                  type="date"
-                  value={bookingForm.date}
-                  onChange={e => setBookingForm({...bookingForm, date: e.target.value})}
-                  min={new Date().toISOString().split('T')[0]}
-                  className="w-full p-3 border border-gray-300 rounded-lg"
-                />
+                <h2 className="text-2xl font-bold text-gray-800">{selectedTest.test_name}</h2>
+                <p className="text-gray-500">{selectedTest.category} | {selectedTest.duration}</p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Time</label>
-                <select
-                  value={bookingForm.time}
-                  onChange={e => setBookingForm({...bookingForm, time: e.target.value})}
-                  className="w-full p-3 border border-gray-300 rounded-lg"
+              <button onClick={() => setSelectedTest(null)} className="text-gray-500 hover:text-gray-700">
+                <X size={22} />
+              </button>
+            </div>
+            <p className="text-gray-700 mb-4">{selectedTest.description || 'Accurate diagnostics with reliable reporting.'}</p>
+            {selectedTest.preparation && (
+              <p className="text-sm text-amber-700 bg-amber-50 p-3 rounded-lg mb-5">
+                <AlertCircle size={14} className="inline mr-1" /> Preparation: {selectedTest.preparation}
+              </p>
+            )}
+            <div className="grid md:grid-cols-2 gap-5 mb-6">
+              <div className="bg-gray-50 rounded-xl p-4">
+                <h4 className="font-semibold text-gray-800 mb-3">What This Test Includes</h4>
+                <ul className="space-y-2 text-sm text-gray-600">
+                  {getTestIncludes(selectedTest).map((item, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <CheckCircle size={14} className="text-green-500 mt-0.5" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-4">
+                <h4 className="font-semibold text-gray-800 mb-3">Price Breakup</h4>
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex items-center justify-between">
+                    <span>Base Test Charge</span>
+                    <span>INR {getPriceBreakup(selectedTest).base_test_charge}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Sample Collection</span>
+                    <span>INR {getPriceBreakup(selectedTest).sample_collection_charge}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Reporting</span>
+                    <span>INR {getPriceBreakup(selectedTest).reporting_charge}</span>
+                  </div>
+                  <div className="border-t pt-2 mt-2 flex items-center justify-between font-semibold text-gray-800">
+                    <span>Total</span>
+                    <span>INR {getPriceBreakup(selectedTest).total}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {!showBookingForm ? (
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setSelectedTest(null)}
+                  className="flex-1 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
-                  <option value="">Select time</option>
-                  <option value="08:00 AM">08:00 AM</option>
-                  <option value="09:00 AM">09:00 AM</option>
-                  <option value="10:00 AM">10:00 AM</option>
-                  <option value="11:00 AM">11:00 AM</option>
-                  <option value="02:00 PM">02:00 PM</option>
-                  <option value="03:00 PM">03:00 PM</option>
-                </select>
+                  Close
+                </button>
+                <button
+                  onClick={() => setShowBookingForm(true)}
+                  className="flex-1 bg-teal-500 text-white py-3 rounded-lg hover:bg-teal-600"
+                >
+                  Book This Test
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Notes (Optional)</label>
-                <textarea
-                  value={bookingForm.notes}
-                  onChange={e => setBookingForm({...bookingForm, notes: e.target.value})}
-                  className="w-full p-3 border border-gray-300 rounded-lg h-20"
-                  placeholder="Any special instructions..."
-                />
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Date</label>
+                  <input
+                    type="date"
+                    value={bookingForm.date}
+                    onChange={e => setBookingForm({ ...bookingForm, date: e.target.value })}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full p-3 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Time</label>
+                  <select
+                    value={bookingForm.time}
+                    onChange={e => setBookingForm({ ...bookingForm, time: e.target.value })}
+                    className="w-full p-3 border border-gray-300 rounded-lg"
+                  >
+                    <option value="">Select time</option>
+                    <option value="08:00 AM">08:00 AM</option>
+                    <option value="09:00 AM">09:00 AM</option>
+                    <option value="10:00 AM">10:00 AM</option>
+                    <option value="11:00 AM">11:00 AM</option>
+                    <option value="02:00 PM">02:00 PM</option>
+                    <option value="03:00 PM">03:00 PM</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Notes (Optional)</label>
+                  <textarea
+                    value={bookingForm.notes}
+                    onChange={e => setBookingForm({ ...bookingForm, notes: e.target.value })}
+                    className="w-full p-3 border border-gray-300 rounded-lg h-20"
+                    placeholder="Any special instructions..."
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowBookingForm(false)}
+                    className="flex-1 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handleBook}
+                    className="flex-1 bg-teal-500 text-white py-3 rounded-lg hover:bg-teal-600"
+                  >
+                    Confirm Booking
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setSelectedTest(null)} className="flex-1 py-3 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-              <button onClick={handleBook} className="flex-1 bg-teal-500 text-white py-3 rounded-lg hover:bg-teal-600">Confirm Booking</button>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -846,7 +1094,7 @@ export const AmbulanceServicePage = ({ user, navigateTo, showToast }) => {
         <div className="bg-gradient-to-r from-red-500 to-red-600 rounded-2xl p-8 md:p-12 mb-10 text-white">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div>
-              <h1 className="text-4xl font-bold mb-4">🚑 Ambulance Service</h1>
+              <h1 className="text-4xl font-bold mb-4">ðŸš‘ Ambulance Service</h1>
               <p className="text-red-100 text-lg mb-4">24/7 Emergency & Scheduled Ambulance Services</p>
               <div className="flex items-center gap-4 text-sm">
                 <span className="bg-white/20 px-3 py-1 rounded-full">Response Time: 5-15 mins</span>
@@ -871,9 +1119,9 @@ export const AmbulanceServicePage = ({ user, navigateTo, showToast }) => {
             <h3 className="text-xl font-bold text-gray-800 mb-2">Advanced Life Support</h3>
             <p className="text-gray-600 text-sm mb-4">Equipped with ventilator, defibrillator, cardiac monitor for critical emergencies.</p>
             <ul className="text-sm text-gray-500 space-y-1">
-              <li>• Ventilator & Defibrillator</li>
-              <li>• Cardiac Monitor</li>
-              <li>• Trained Paramedics</li>
+              <li>â€¢ Ventilator & Defibrillator</li>
+              <li>â€¢ Cardiac Monitor</li>
+              <li>â€¢ Trained Paramedics</li>
             </ul>
           </div>
           <div className="bg-white rounded-xl p-6 shadow-lg">
@@ -883,9 +1131,9 @@ export const AmbulanceServicePage = ({ user, navigateTo, showToast }) => {
             <h3 className="text-xl font-bold text-gray-800 mb-2">Basic Life Support</h3>
             <p className="text-gray-600 text-sm mb-4">Standard emergency transport with oxygen and first aid equipment.</p>
             <ul className="text-sm text-gray-500 space-y-1">
-              <li>• Oxygen Supply</li>
-              <li>• First Aid Kit</li>
-              <li>• Stretcher & Wheelchair</li>
+              <li>â€¢ Oxygen Supply</li>
+              <li>â€¢ First Aid Kit</li>
+              <li>â€¢ Stretcher & Wheelchair</li>
             </ul>
           </div>
           <div className="bg-white rounded-xl p-6 shadow-lg">
@@ -895,9 +1143,9 @@ export const AmbulanceServicePage = ({ user, navigateTo, showToast }) => {
             <h3 className="text-xl font-bold text-gray-800 mb-2">Patient Transport</h3>
             <p className="text-gray-600 text-sm mb-4">Non-emergency transfers for appointments, dialysis, or hospital transfers.</p>
             <ul className="text-sm text-gray-500 space-y-1">
-              <li>• AC Cabin</li>
-              <li>• Wheelchair Accessible</li>
-              <li>• Comfortable Stretcher</li>
+              <li>â€¢ AC Cabin</li>
+              <li>â€¢ Wheelchair Accessible</li>
+              <li>â€¢ Comfortable Stretcher</li>
             </ul>
           </div>
         </div>
@@ -926,7 +1174,7 @@ export const AmbulanceServicePage = ({ user, navigateTo, showToast }) => {
                       <div key={i} className="flex items-center gap-1 text-xs text-gray-500">
                         <CheckCircle size={12} className="text-green-500" />
                         {s.status?.replace('_', ' ')}
-                        {i < req.status_history.length - 1 && <span className="mx-1">→</span>}
+                        {i < req.status_history.length - 1 && <span className="mx-1">â†’</span>}
                       </div>
                     ))}
                   </div>
@@ -939,7 +1187,7 @@ export const AmbulanceServicePage = ({ user, navigateTo, showToast }) => {
         {/* Emergency Contact */}
         <div className="bg-gray-800 rounded-xl p-6 text-white text-center">
           <h3 className="text-2xl font-bold mb-2">Emergency Helpline</h3>
-          <p className="text-4xl font-bold text-red-400 mb-2">📞 108</p>
+          <p className="text-4xl font-bold text-red-400 mb-2">ðŸ“ž 108</p>
           <p className="text-gray-400">Available 24/7 for medical emergencies</p>
         </div>
       </div>
@@ -1054,7 +1302,7 @@ export const InventoryPage = ({ user, showToast }) => {
   const categories = [...new Set(inventory.map(i => i.category))];
   const filtered = category ? inventory.filter(i => i.category === category) : inventory;
 
-  if (!user || !['admin', 'staff', 'doctor'].includes(user.role)) {
+  if (!user || !hasRole(user, ['admin', 'staff', 'doctor', 'nurse', 'hospital_administrator'])) {
     return (
       <div className="py-24 flex items-center justify-center">
         <p className="text-gray-500">Access denied. Staff access required.</p>
@@ -1225,7 +1473,7 @@ export const PaymentSuccessPage = ({ showToast, navigateTo }) => {
             {paymentData && (
               <div className="bg-gray-50 p-4 rounded-lg mb-6 text-left">
                 <p className="text-sm text-gray-500">Amount Paid</p>
-                <p className="text-xl font-bold text-teal-600">₹{paymentData.amount}</p>
+                <p className="text-xl font-bold text-teal-600">â‚¹{paymentData.amount}</p>
               </div>
             )}
             <button
@@ -1301,4 +1549,5 @@ export const PaymentCancelPage = ({ navigateTo }) => {
     </div>
   );
 };
+
 
