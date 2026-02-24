@@ -155,6 +155,7 @@ security = HTTPBearer()
 async def startup_optimizations():
     # Build indexes for hot auth/query paths and warm DB connection.
     try:
+        await repair_catalog_duplicates()
         await asyncio.gather(
             users_collection.update_many(
                 {"email_normalized": {"$exists": False}, "email": {"$type": "string"}},
@@ -171,7 +172,11 @@ async def startup_optimizations():
             users_collection.create_index("email_normalized"),
             doctors_collection.create_index("id"),
             doctors_collection.create_index("email"),
-            doctors_collection.create_index("email_normalized"),
+            doctors_collection.create_index(
+                "email_normalized",
+                unique=True,
+                partialFilterExpression={"email_normalized": {"$type": "string"}},
+            ),
             doctors_collection.create_index([("department", 1), ("name", 1)]),
             doctors_collection.create_index("name"),
             appointments_collection.create_index([("patient_id", 1), ("created_at", -1)]),
@@ -180,7 +185,11 @@ async def startup_optimizations():
             health_packages_collection.create_index("category"),
             lab_tests_collection.create_index("category"),
             beds_collection.create_index([("ward", 1), ("status", 1)]),
-            departments_collection.create_index("slug"),
+            departments_collection.create_index(
+                "slug",
+                unique=True,
+                partialFilterExpression={"slug": {"$type": "string"}},
+            ),
             reports_collection.create_index([("patient_id", 1), ("created_at", -1)]),
             notifications_collection.create_index([("user_id", 1), ("created_at", -1)]),
             messages_collection.create_index([("sender_id", 1), ("receiver_id", 1), ("created_at", -1)]),
@@ -747,6 +756,86 @@ def enrich_lab_test(test_doc: dict) -> dict:
     enriched["price_breakup"] = build_lab_test_price_breakup(test_doc)
     return enriched
 
+def _normalize_whitespace(value: Optional[str]) -> str:
+    return " ".join((value or "").strip().split())
+
+def build_doctor_identity_key(doc: dict) -> Optional[str]:
+    name = _normalize_whitespace(doc.get("name")).lower()
+    department = _normalize_whitespace(doc.get("department")).lower()
+    if not name or not department:
+        return None
+    return f"{name}|{department}"
+
+async def repair_catalog_duplicates() -> Dict[str, int]:
+    summary = {"departments_removed": 0, "doctors_removed": 0}
+
+    # Normalize + dedupe departments by canonical slug.
+    dept_seen: Dict[str, ObjectId] = {}
+    dept_duplicate_ids: List[ObjectId] = []
+    dept_cursor = departments_collection.find(
+        {},
+        {"_id": 1, "slug": 1, "name": 1, "created_at": 1},
+    ).sort([("created_at", -1), ("_id", -1)])
+    async for dept in dept_cursor:
+        canonical_slug = slugify(str(dept.get("slug") or dept.get("name") or ""))
+        if not canonical_slug:
+            continue
+        if dept.get("slug") != canonical_slug:
+            await departments_collection.update_one(
+                {"_id": dept["_id"]},
+                {"$set": {"slug": canonical_slug}},
+            )
+        if canonical_slug in dept_seen:
+            dept_duplicate_ids.append(dept["_id"])
+            continue
+        dept_seen[canonical_slug] = dept["_id"]
+
+    if dept_duplicate_ids:
+        result = await departments_collection.delete_many({"_id": {"$in": dept_duplicate_ids}})
+        summary["departments_removed"] = result.deleted_count
+
+    # Normalize + dedupe doctors by email first, then by identity (name+department).
+    doctor_seen_emails: Dict[str, ObjectId] = {}
+    doctor_seen_identity: Dict[str, ObjectId] = {}
+    doctor_duplicate_ids: List[ObjectId] = []
+    doctor_cursor = doctors_collection.find(
+        {},
+        {"_id": 1, "email": 1, "email_normalized": 1, "name": 1, "department": 1, "created_at": 1},
+    ).sort([("created_at", -1), ("_id", -1)])
+    async for doctor in doctor_cursor:
+        normalized_email = normalize_email(doctor.get("email_normalized") or doctor.get("email") or "")
+        updates: Dict[str, str] = {}
+        if normalized_email:
+            if doctor.get("email") != normalized_email:
+                updates["email"] = normalized_email
+            if doctor.get("email_normalized") != normalized_email:
+                updates["email_normalized"] = normalized_email
+        if updates:
+            await doctors_collection.update_one({"_id": doctor["_id"]}, {"$set": updates})
+
+        duplicate = False
+        if normalized_email:
+            if normalized_email in doctor_seen_emails:
+                duplicate = True
+            else:
+                doctor_seen_emails[normalized_email] = doctor["_id"]
+
+        identity_key = build_doctor_identity_key(doctor)
+        if not duplicate and identity_key:
+            if identity_key in doctor_seen_identity:
+                duplicate = True
+            else:
+                doctor_seen_identity[identity_key] = doctor["_id"]
+
+        if duplicate:
+            doctor_duplicate_ids.append(doctor["_id"])
+
+    if doctor_duplicate_ids:
+        result = await doctors_collection.delete_many({"_id": {"$in": doctor_duplicate_ids}})
+        summary["doctors_removed"] = result.deleted_count
+
+    return summary
+
 async def insert_missing_documents(collection, documents: List[dict], unique_field: str) -> int:
     inserted = 0
     for doc in documents:
@@ -821,6 +910,8 @@ async def sync_seed_catalog() -> dict:
     summary = {
         "departments_added": 0,
         "doctors_added": 0,
+        "departments_deduplicated": 0,
+        "doctors_deduplicated": 0,
         "packages_added": 0,
         "lab_tests_added": 0,
         "beds_added": 0,
@@ -840,6 +931,9 @@ async def sync_seed_catalog() -> dict:
     except Exception:
         return summary
 
+    repair_summary = await repair_catalog_duplicates()
+    summary["departments_deduplicated"] = repair_summary["departments_removed"]
+    summary["doctors_deduplicated"] = repair_summary["doctors_removed"]
     summary["departments_added"] = await insert_missing_documents(departments_collection, DEPARTMENTS, "slug")
     summary["doctors_added"] = await insert_missing_documents(doctors_collection, generate_doctors(), "email")
     summary["packages_added"] = await insert_missing_documents(health_packages_collection, HEALTH_PACKAGES, "name")
@@ -884,9 +978,20 @@ async def get_departments(response: Response):
     cache_key = build_public_cache_key("departments")
 
     async def _load_departments():
-        departments = await departments_collection.find({}, {"_id": 0}).sort("name", 1).to_list(50)
+        departments = await departments_collection.find({}, {"_id": 0}).sort("name", 1).to_list(100)
         if departments:
-            return departments
+            deduped: Dict[str, dict] = {}
+            fallback = 0
+            for department in departments:
+                canonical_slug = slugify(str(department.get("slug") or department.get("name") or ""))
+                key = canonical_slug or f"idx-{fallback}"
+                if key not in deduped:
+                    payload = dict(department)
+                    if canonical_slug:
+                        payload["slug"] = canonical_slug
+                    deduped[key] = payload
+                    fallback += 1
+            return sorted(deduped.values(), key=lambda item: item.get("name", ""))
 
         # Fallback for partially seeded databases: infer departments from doctors.
         doctor_departments = await doctors_collection.distinct("department")
@@ -1201,10 +1306,20 @@ async def get_doctors(response: Response, department: Optional[str] = None):
 
     async def _load_doctors():
         query = {} if not department else {"department": department}
-        return await doctors_collection.find(
+        doctors = await doctors_collection.find(
             query,
             {"_id": 0, "password": 0},
         ).sort("name", 1).to_list(1000)
+        deduped: List[dict] = []
+        seen: set = set()
+        for doctor in doctors:
+            identity_key = build_doctor_identity_key(doctor)
+            if identity_key and identity_key in seen:
+                continue
+            if identity_key:
+                seen.add(identity_key)
+            deduped.append(doctor)
+        return deduped
 
     return await get_or_set_public_payload(cache_key, _load_doctors)
 
@@ -2503,22 +2618,6 @@ async def seed_data(current_user: dict = Depends(get_current_user)):
             {"id": str(uuid.uuid4()), "name": "Patient Monitor", "category": "Monitoring", "department": "ICU", "description": "Multi-parameter patient monitoring system", "manufacturer": "Philips", "model": "IntelliVue MX800", "status": "Available", "image": "https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=400"},
         ]
         await equipment_collection.insert_many(equipment_data)
-    
-    # Seed doctors if empty
-    doctors_count = await doctors_collection.count_documents({})
-    if doctors_count == 0:
-        doctors_data = [
-            {"id": str(uuid.uuid4()), "name": "Dr. Ananya Sharma", "email": "ananya@nirmaya.com", "password": hash_password("doctor123"), "specialty": "Cardiologist", "department": "Cardiology", "experience": "15 years", "qualifications": "MD, DM Cardiology", "certifications": ["FACC", "FSCAI"], "bio": "Expert in interventional cardiology with focus on complex coronary interventions.", "image": "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=400", "time_slots": ["09:00", "10:00", "11:00", "14:00", "15:00"], "consultation_fee": 800, "video_consultation_fee": 600, "role": "doctor", "available_for_video": True, "created_at": datetime.utcnow().isoformat()},
-            {"id": str(uuid.uuid4()), "name": "Dr. Rajesh Kumar", "email": "rajesh@nirmaya.com", "password": hash_password("doctor123"), "specialty": "Neurologist", "department": "Neurology", "experience": "12 years", "qualifications": "MD, DM Neurology", "certifications": ["FAAN"], "bio": "Specializes in stroke management and neurodegenerative diseases.", "image": "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?w=400", "time_slots": ["10:00", "11:00", "12:00", "15:00", "16:00"], "consultation_fee": 750, "video_consultation_fee": 550, "role": "doctor", "available_for_video": True, "created_at": datetime.utcnow().isoformat()},
-            {"id": str(uuid.uuid4()), "name": "Dr. Priya Patel", "email": "priya@nirmaya.com", "password": hash_password("doctor123"), "specialty": "Pediatrician", "department": "Pediatrics", "experience": "10 years", "qualifications": "MD Pediatrics", "certifications": ["IAP Fellow"], "bio": "Dedicated to children's health with expertise in neonatal care.", "image": "https://images.unsplash.com/photo-1594824476967-48c8b964273f?w=400", "time_slots": ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"], "consultation_fee": 600, "video_consultation_fee": 450, "role": "doctor", "available_for_video": True, "created_at": datetime.utcnow().isoformat()},
-            {"id": str(uuid.uuid4()), "name": "Dr. Vikram Singh", "email": "vikram@nirmaya.com", "password": hash_password("doctor123"), "specialty": "Orthopedic Surgeon", "department": "Orthopedics", "experience": "18 years", "qualifications": "MS Orthopedics", "certifications": ["FICS"], "bio": "Expert in joint replacement surgery and sports medicine.", "image": "https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=400", "time_slots": ["09:00", "10:00", "14:00", "15:00"], "consultation_fee": 900, "video_consultation_fee": 700, "role": "doctor", "available_for_video": True, "created_at": datetime.utcnow().isoformat()},
-            {"id": str(uuid.uuid4()), "name": "Dr. Meera Reddy", "email": "meera@nirmaya.com", "password": hash_password("doctor123"), "specialty": "Dermatologist", "department": "Dermatology", "experience": "8 years", "qualifications": "MD Dermatology", "certifications": ["IADVL"], "bio": "Specializes in cosmetic dermatology and skin cancer treatment.", "image": "https://images.unsplash.com/photo-1651008376811-b90baee60c1f?w=400", "time_slots": ["10:00", "11:00", "12:00", "15:00", "16:00", "17:00"], "consultation_fee": 700, "video_consultation_fee": 500, "role": "doctor", "available_for_video": True, "created_at": datetime.utcnow().isoformat()},
-        ]
-        for doctor in doctors_data:
-            normalized_email = normalize_email(doctor.get("email", ""))
-            doctor["email"] = normalized_email
-            doctor["email_normalized"] = normalized_email
-        await doctors_collection.insert_many(doctors_data)
     
     # Seed health packages if empty
     packages_count = await health_packages_collection.count_documents({})
