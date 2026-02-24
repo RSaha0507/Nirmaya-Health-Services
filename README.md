@@ -1,626 +1,415 @@
-# 🏥 Nirmaya Health Services
+# Nirmaya Health Services
 
-<div align="center">
+<p align="center">
+  Smart hospital platform with patient, doctor, operations, and admin workflows.
+</p>
 
-<img width="1919" height="832" alt="image" src="https://github.com/user-attachments/assets/5c265878-6bdc-4e92-b738-4d54cdabdfc9" />
+<p align="center">
+  <a href="https://nirmaya-health-services.netlify.app"><img src="https://img.shields.io/badge/Frontend-Netlify-00C7B7?style=for-the-badge&logo=netlify&logoColor=white" alt="Frontend Netlify" /></a>
+  <a href="https://nirmaya-health-backend-2026.onrender.com/api/health"><img src="https://img.shields.io/badge/Backend-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white" alt="Backend Render" /></a>
+  <img src="https://img.shields.io/badge/React-19.1.1-20232A?style=for-the-badge&logo=react" alt="React" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115.6-009688?style=for-the-badge&logo=fastapi" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb" alt="MongoDB Atlas" />
+</p>
 
-
-### Smart Hospital Management System
-
-**A modern, comprehensive full-stack healthcare platform built with React & FastAPI**
-
-[![Live Demo](https://img.shields.io/badge/demo-live-success?style=for-the-badge)](https://nirmaya-health-services.netlify.app/)
-[![React](https://img.shields.io/badge/React-19.1.1-61dafb?style=for-the-badge&logo=react)](https://reactjs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
-
-[Live Demo](https://nirmaya-health-services.netlify.app/) • [Report Bug](https://github.com/RSaha0507/Nirmaya-Health-Services/issues) • [Request Feature](https://github.com/RSaha0507/Nirmaya-Health-Services/issues)
-
-</div>
-
----
-
-## 📋 Table of Contents
-
-- [Overview](#-overview)
-- [Key Features](#-key-features)
-- [Tech Stack](#-tech-stack)
-- [Architecture](#-architecture)
-- [Getting Started](#-getting-started)
-- [Project Structure](#-project-structure)
-- [API Documentation](#-api-documentation)
-- [User Roles](#-user-roles)
-- [Screenshots](#-screenshots)
-- [Deployment](#-deployment)
-- [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Contact](#-contact)
+<p align="center">
+  <a href="https://nirmaya-health-services.netlify.app">Live Frontend</a>
+  -
+  <a href="https://nirmaya-health-backend-2026.onrender.com/api/health">Live Backend Health</a>
+  -
+  <a href="https://github.com/RSaha0507/Nirmaya-Health-Services/issues">Issues</a>
+</p>
 
 ---
 
-## 🌟 Overview
-
-**Nirmaya Health Services** is a production-ready, enterprise-grade hospital management system that revolutionizes healthcare delivery through modern technology. Built with cutting-edge frameworks and designed for scalability, this platform seamlessly connects patients, doctors, and administrators in a unified ecosystem.
-
-### Why Nirmaya?
-
-- 🚀 **Modern Stack** - Built with React 19 and FastAPI for blazing-fast performance
-- 🔐 **Enterprise Security** - JWT authentication, bcrypt hashing, and role-based access control
-- 💬 **Real-time Communication** - WebSocket-powered notifications and messaging
-- 💳 **Integrated Payments** - Stripe payment gateway for seamless transactions
-- 🤖 **AI-Powered** - Google Gemini API integration for intelligent chatbot assistance
-- 📱 **Responsive Design** - Mobile-first approach with TailwindCSS
-- ⚡ **High Performance** - Async operations with Motor and FastAPI
-- 🏥 **Comprehensive** - 15+ medical departments with specialized features
-
----
-
-## ✨ Key Features
-
-### For Patients 👥
-
-- **Smart Appointment Booking**
-  - Multi-step intuitive booking flow
-  - Real-time doctor availability
-  - Department and specialty filtering
-  - Online consultation options
-
-- **Personalized Dashboard**
-  - View upcoming and past appointments
-  - Access medical records and prescriptions
-  - Download reports and test results
-  - Track health checkup packages
-
-- **AI Health Assistant**
-  - 24/7 chatbot powered by Google Gemini
-  - Instant answers to health queries
-  - Department and service recommendations
-
-- **Emergency Services**
-  - Quick ambulance booking
-  - Real-time ambulance tracking
-  - Emergency contact integration
-
-- **Health Packages**
-  - Comprehensive health checkup packages
-  - Discounted pricing
-  - Easy online booking and payment
-
-### For Doctors 👨‍⚕️
-
-- **Professional Portal**
-  - Dedicated dashboard for appointment management
-  - Patient medical history access
-  - Real-time schedule updates
-  - Digital prescription generation
-
-- **Appointment Management**
-  - View daily/weekly schedules
-  - Patient details and medical records
-  - Appointment cancellation and rescheduling
-  - Consultation notes and documentation
-
-- **Communication Tools**
-  - Secure messaging with patients
-  - Real-time notifications
-  - Video consultation integration
-
-### For Administrators ⚙️
-
-- **Complete Control Panel**
-  - Full CRUD operations for all entities
-  - User and doctor management
-  - Appointment oversight and analytics
-
-- **Resource Management**
-  - Medical equipment inventory tracking
-  - Bed availability management
-  - Department and staff scheduling
-  - Ambulance fleet management
-
-- **Analytics & Reporting**
-  - Visual dashboards with Recharts
-  - Revenue tracking and statistics
-  - Patient demographics and trends
-  - System performance metrics
-
-- **System Configuration**
-  - Payment gateway settings
-  - Notification preferences
-  - Role and permission management
-  - Database backups and maintenance
+## Table Of Contents
+- [Platform Snapshot](#platform-snapshot)
+- [Salient Features](#salient-features)
+- [Architecture At A Glance](#architecture-at-a-glance)
+- [Core Workflows](#core-workflows)
+- [Security And Runtime Hardening](#security-and-runtime-hardening)
+- [Tech Stack](#tech-stack)
+- [API Surface (Domain Map)](#api-surface-domain-map)
+- [Repository Structure](#repository-structure)
+- [Local Development](#local-development)
+- [Environment Variables](#environment-variables)
+- [Build, Deploy, Verify](#build-deploy-verify)
+- [Testing And Health Checks](#testing-and-health-checks)
+- [Roadmap](#roadmap)
 
 ---
 
-## 🛠️ Tech Stack
+## Platform Snapshot
+Nirmaya Health Services is a full-stack healthcare operations platform that connects:
+- patients (appointments, reports, packages, payments),
+- doctors (portal, schedules, communication),
+- operations staff (inventory, beds, ambulance, lab),
+- administrators (analytics, users, governance).
+
+The platform is built as a React frontend and FastAPI backend with MongoDB Atlas, Stripe integration, and authenticated WebSocket messaging.
+
+---
+
+## Salient Features
+
+### Multi-role product surface
+- Patient journeys: registration/login, doctor discovery, booking, payments, reports.
+- Doctor workflows: dashboard, patient interactions, prescription flow, communication.
+- Operations workflows: bed management, inventory usage/restock, shift coordination.
+- Admin workflows: user management, operational analytics, master data controls.
+
+### Performance-focused runtime
+- Backend gzip compression and tuned Mongo connection pooling.
+- Startup index creation for hot query paths.
+- Public endpoint response caching with TTL + stale-while-revalidate.
+- Frontend in-memory cache + persisted session cache + in-flight GET dedupe.
+- Idle prefetch for hot catalogs (doctors, equipment, departments, packages).
+- Netlify static asset caching policy for immutable hashed bundles.
+
+### Security-focused defaults
+- JWT auth with role and ownership authorization.
+- Strict CORS allowlist normalization (no wildcard credentials pattern).
+- `/api/seed` and demo payment routes gated by env flags.
+- WebSocket handshake auth with user-token binding.
+- Report URL sanitization and optional host allowlist.
+- Trusted origin enforcement for Stripe redirect URLs.
+
+### Delivery-ready routing model
+- Path-first navigation model with deep-link support (`/doctors`, `/equipment`, `/dashboard`, etc.).
+- Netlify redirect rules ensure all app routes hydrate from `index.html`.
+
+---
+
+## Architecture At A Glance
+
+```mermaid
+flowchart LR
+    U[Users: Patient / Doctor / Admin / Staff] --> FE[React Frontend on Netlify]
+    FE -->|HTTPS REST| API[FastAPI Backend on Render]
+    FE -->|WebSocket| API
+    API --> DB[(MongoDB Atlas)]
+    API --> STRIPE[Stripe API]
+    API --> GEMINI[Gemini API]
+```
+
+### Runtime layers
+1. Edge + static delivery: Netlify serves build artifacts with cache headers.
+2. Application layer: React app handles UX, route-state mapping, API orchestration.
+3. API layer: FastAPI enforces authn/authz, validation, and business workflows.
+4. Data layer: MongoDB stores core entities and transaction records.
+
+---
+
+## Core Workflows
+
+### 1) Authentication flow
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI
+    participant M as MongoDB
+    C->>A: POST /api/auth/login
+    A->>M: find user by normalized email
+    M-->>A: user document
+    A-->>C: JWT token + user payload
+    C->>A: GET /api/auth/me (Bearer token)
+    A-->>C: current profile (cached + validated)
+```
+
+### 2) Doctor discovery flow
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI
+    participant M as MongoDB
+    C->>A: GET /api/doctors
+    A->>A: check public endpoint cache
+    alt cache hit
+      A-->>C: doctors list (low latency)
+    else cache miss
+      A->>M: indexed query
+      M-->>A: doctors
+      A-->>C: doctors + cache headers
+    end
+```
+
+### 3) Payment checkout flow
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI
+    participant S as Stripe
+    participant M as MongoDB
+    C->>A: POST /api/payments/create-checkout
+    A->>A: validate trusted origin + authz
+    A->>S: create checkout session
+    S-->>A: checkout URL + session_id
+    A->>M: persist payment transaction
+    A-->>C: checkout URL
+    C->>S: complete payment
+    C->>A: GET /api/payments/status/{session_id}
+    A->>S: retrieve session status
+    A->>M: reconcile and update local records
+    A-->>C: final payment status
+```
+
+### 4) Realtime messaging flow
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI WebSocket
+    participant M as MongoDB
+    C->>A: WS connect /api/ws/{user_id}?token=...
+    A->>A: decode token + bind user_id
+    A-->>C: connection accepted
+    C->>A: message payload
+    A->>M: store message
+    A-->>C: ack / routed notifications
+```
+
+---
+
+## Security And Runtime Hardening
+
+### Security controls currently implemented
+- Env-gated sensitive routes:
+  - `ENABLE_SEED_ENDPOINT` (default off),
+  - `ENABLE_DEMO_PAYMENT_ROUTES` (default off).
+- Authz controls:
+  - role checks for admin/staff routes,
+  - ownership checks for payment access.
+- CORS controls:
+  - normalized allowlist,
+  - explicit methods/headers,
+  - credential wildcard behavior blocked.
+- WebSocket handshake:
+  - token required,
+  - token user must match route user.
+- Input sanitization:
+  - strict report `file_url` validation,
+  - optional host allowlist via env.
+
+### Performance controls currently implemented
+- GZip middleware for response compression.
+- Startup index creation for common query patterns.
+- Auth user short-TTL cache (`AUTH_USER_CACHE_TTL_SECONDS`).
+- Public catalog short-TTL cache (`PUBLIC_ENDPOINT_CACHE_TTL_SECONDS`).
+- Frontend API client:
+  - response cache,
+  - session persisted cache for hot endpoints,
+  - inflight request dedupe.
+- Idle prefetch for catalog pages.
+- Static asset caching policy in `frontend/public/_headers`.
+
+---
+
+## Tech Stack
 
 ### Frontend
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **React** | 19.1.1 | UI Framework |
-| **TailwindCSS** | 3.4.1 | Styling |
-| **Lucide React** | 0.539.0 | Icons |
-| **Recharts** | 3.6.0 | Data Visualization |
-| **Firebase** | 12.1.0 | Authentication & Storage |
-| **Date-fns** | 4.1.0 | Date Manipulation |
+| Package | Version | Role |
+|---|---:|---|
+| `react` | `19.1.1` | UI runtime |
+| `react-dom` | `19.1.1` | DOM rendering |
+| `react-scripts` | `5.0.1` | Build tooling |
+| `tailwindcss` | `3.4.1` | Utility styling |
+| `recharts` | `3.6.0` | Analytics charts |
+| `lucide-react` | `0.539.0` | Icon system |
+| `date-fns` | `4.1.0` | Date utilities |
 
 ### Backend
+| Package | Version | Role |
+|---|---:|---|
+| `fastapi` | `0.115.6` | API framework |
+| `uvicorn` | `0.34.0` | ASGI server |
+| `motor` | `3.7.0` | Async Mongo driver |
+| `pymongo` | `4.11.3` | Mongo toolkit |
+| `PyJWT` | `2.10.1` | JWT signing/verification |
+| `bcrypt` | `4.2.1` | Password hashing |
+| `httpx` | `0.28.1` | Async HTTP client |
+| `websockets` | `14.1` | Realtime transport |
+| `stripe` | `14.2.0` | Payment gateway |
 
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **FastAPI** | 0.115.6 | Web Framework |
-| **Motor** | 3.7.0 | Async MongoDB Driver |
-| **PyJWT** | 2.10.1 | JWT Authentication |
-| **Bcrypt** | 4.2.1 | Password Hashing |
-| **HTTPx** | 0.28.1 | HTTP Client |
-| **WebSockets** | 14.1 | Real-time Communication |
-| **Stripe** | Latest | Payment Processing |
-
-### Database & Infrastructure
-
-- **MongoDB Atlas** - Cloud NoSQL Database
-- **Netlify** - Frontend Hosting
-- **Google Gemini API** - AI Chatbot
-
----
-
-## 🏗️ Architecture
-
-### System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLIENT LAYER                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │   Patient    │  │    Doctor    │  │    Admin     │       │
-│  │   Portal     │  │    Portal    │  │   Portal     │       │
-│  └──────────────┘  └──────────────┘  └──────────────┘       │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    FRONTEND (React 19)                      │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
-│  │   Pages  │  │Components│  │  State   │  │   API    │     │
-│  │ (30+)    │  │  (Reusable)│ │Management│ │  Client  │     │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                    ┌───────┴───────┐
-                    │   REST API    │
-                    │   WebSocket   │
-                    └───────┬───────┘
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   BACKEND (FastAPI)                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
-│  │   Auth   │  │   API    │  │WebSocket │  │ Payment  │     │
-│  │  Layer   │  │ Endpoints│  │ Manager  │  │ Gateway  │     │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   DATABASE (MongoDB)                        │
-│  ┌──────┐ ┌───────┐ ┌──────┐ ┌──────┐ ┌────────┐ ┌───────┐  │
-│  │Users │ │Doctors│ │Appts │ │Equip │ │Payments│ │Records│  │
-│  └──────┘ └───────┘ └──────┘ └──────┘ └────────┘ └───────┘  │
-│                   (20+ Collections)                         │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Database Schema
-
-**21 MongoDB Collections:**
-
-1. `users` - Patient accounts and profiles
-2. `doctors` - Doctor profiles with specialties & schedules
-3. `appointments` - Appointment bookings and history
-4. `messages` - Chat and messaging system
-5. `equipment` - Medical equipment inventory
-6. `inventory` - General inventory management
-7. `shifts` - Staff shift scheduling
-8. `reports` - Medical reports and documents
-9. `analytics` - System analytics and metrics
-10. `notifications` - User notifications
-11. `payments` - Payment records
-12. `health_packages` - Health checkup packages
-13. `ambulance_requests` - Ambulance bookings
-14. `health_records` - Patient medical records
-15. `lab_tests` - Laboratory test data
-16. `beds` - Hospital bed management
-17. `prescriptions` - Doctor prescriptions
-18. `departments` - Hospital departments
-19. `ambulances` - Ambulance fleet data
-20. `payment_transactions` - Stripe transactions
-21. `package_bookings` - Package booking records
+### Infrastructure
+- Frontend hosting: Netlify
+- Backend hosting: Render
+- Database: MongoDB Atlas
 
 ---
 
-## 🚀 Getting Started
+## API Surface (Domain Map)
+
+### Core domains
+- Health + bootstrap: `/api/health`, `/api/departments`
+- Identity: `/api/auth/*`
+- Doctors + appointments: `/api/doctors*`, `/api/appointments*`
+- Payments:
+  - legacy/demo routes: `/api/payments/initiate`, `/api/payments/verify`, `/api/payments/simulate`
+  - Stripe routes: `/api/payments/create-checkout`, `/api/payments/status/{session_id}`, `/api/payments/history`
+- Operations: `/api/inventory*`, `/api/shifts*`, `/api/beds*`, `/api/ambulance*`, `/api/lab-tests*`
+- Clinical records: `/api/reports*`, `/api/prescriptions*`, `/api/health-records*`
+- Communication: `/api/messages*`, `/api/ws/{user_id}`
+- Analytics: `/api/analytics/patient`, `/api/analytics/doctor`, `/api/analytics/operations`, `/api/analytics/admin`
+- Administration: `/api/users`, `/api/patients`, `/api/users/{user_id}`
+
+### API style
+- JSON REST over HTTPS.
+- Bearer token auth on protected routes.
+- WebSocket channel for realtime events.
+
+---
+
+## Repository Structure
+
+```text
+Nirmaya-Health-Services/
+|-- backend/
+|   |-- server.py                # FastAPI app, routes, authz, caching, websocket
+|   |-- requirements.txt         # Python dependencies
+|   `-- seeds/                   # Seed catalog data
+|-- frontend/
+|   |-- src/
+|   |   |-- MainApp.js           # Main app runtime and route orchestration
+|   |   |-- AdditionalPages.js   # Additional service pages
+|   |   `-- services/apiClient.js# API client, token + cache + safe URL helpers
+|   |-- public/
+|   |   |-- _headers             # Netlify cache-control policy
+|   |   `-- _redirects           # Deep-link route mapping
+|   `-- package.json             # Frontend dependencies and scripts
+|-- render.yaml                  # Render backend blueprint
+`-- README.md
+```
+
+---
+
+## Local Development
 
 ### Prerequisites
+- Node.js 18+ (recommended)
+- Python 3.10+ (recommended)
+- MongoDB Atlas connection string
+- Stripe secret key (for checkout flow testing)
 
-- **Node.js** 16.x or higher
-- **Python** 3.8 or higher
-- **MongoDB Atlas** account
-- **Firebase** project
-- **Stripe** account (for payments)
-- **Google AI API** key (for chatbot)
-
-### Backend Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/RSaha0507/Nirmaya-Health-Services.git
-   cd Nirmaya-Health-Services
-   ```
-
-2. **Navigate to backend**
-   ```bash
-   cd backend
-   ```
-
-3. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   
-   # Windows
-   venv\Scripts\activate
-   
-   # macOS/Linux
-   source venv/bin/activate
-   ```
-
-4. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-5. **Configure environment variables**
-   
-   Create a `.env` file in the `backend` directory:
-   ```env
-   MONGO_URL=mongodb+srv://username:password@cluster.mongodb.net/nirmaya_health
-   JWT_SECRET=your_super_secret_jwt_key_here
-   GEMINI_API_KEY=your_gemini_api_key_here
-   STRIPE_API_KEY=your_stripe_secret_key_here
-   ```
-
-6. **Run the backend server**
-   ```bash
-   python server.py
-   ```
-   
-   Server will start at `http://localhost:8001`
-
-### Frontend Setup
-
-1. **Navigate to frontend**
-   ```bash
-   cd ../frontend
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment variables**
-   
-   Create `.env` in the `frontend` directory:
-   ```env
-   REACT_APP_BACKEND_URL=http://localhost:8001/api
-   ```
-
-4. **Start development server**
-   ```bash
-   npm start
-   ```
-   
-   Application will open at `http://localhost:3000`
-
-### Demo Accounts
-
-**Admin Access:**
-- Email: `admin@nirmaya.com`
-- Password: `admin123`
-
-**Doctor Access:**
-- Email: `ananya@nirmaya.com`
-- Password: `doctor123`
-
-**Patient Access:**
-- Create a new account via Sign Up
-
----
-
-## 📁 Project Structure
-
+### 1) Clone
+```bash
+git clone https://github.com/RSaha0507/Nirmaya-Health-Services.git
+cd Nirmaya-Health-Services
 ```
-Nirmaya-Health-Services/
-│
-├── backend/
-│   ├── server.py              # Main FastAPI application (98KB)
-│   ├── requirements.txt       # Python dependencies
-│   ├── .env                   # Environment variables
-│   ├── seeds/                 # Database seeding scripts
-│   └── venv/                  # Virtual environment
-│
-├── frontend/
-│   ├── public/
-│   │   ├── logo.png           # Application logo
-│   │   └── index.html         # HTML template
-│   │
-│   ├── src/
-│   │   ├── components/        # Reusable components
-│   │   │   ├── Chatbot.js
-│   │   │   ├── Navbar.js
-│   │   │   ├── Footer.js
-│   │   │   └── ...
-│   │   │
-│   │   ├── pages/             # 30+ page components
-│   │   │   ├── HomePage.js
-│   │   │   ├── LoginPage.js
-│   │   │   ├── DoctorsPage.js
-│   │   │   ├── AdminDashboard.js
-│   │   │   ├── DoctorPortal.js
-│   │   │   └── ...
-│   │   │
-│   │   ├── data/              # Static data for departments
-│   │   │   ├── cardiology.js
-│   │   │   ├── neurology.js
-│   │   │   └── ...
-│   │   │
-│   │   ├── App.js             # Main application component
-│   │   ├── firebase.js        # Firebase configuration
-│   │   └── index.js           # Application entry point
-│   │
-│   ├── package.json           # Node dependencies
-│   ├── tailwind.config.js     # Tailwind configuration
-│   └── postcss.config.js      # PostCSS configuration
-│
-├── .gitignore
-├── README.md
-└── LICENSE
+
+### 2) Backend setup
+```bash
+cd backend
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+# source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Run backend:
+```bash
+uvicorn server:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 3) Frontend setup
+```bash
+cd ../frontend
+npm install
+```
+
+Run frontend:
+```bash
+# Windows PowerShell
+$env:REACT_APP_BACKEND_URL="http://localhost:8000"
+npm start
 ```
 
 ---
 
-## 📚 API Documentation
+## Environment Variables
 
-### Authentication Endpoints
+### Required (backend)
+| Variable | Required | Purpose |
+|---|---|---|
+| `MONGO_URL` | Yes | MongoDB connection string |
+| `JWT_SECRET` | Yes | JWT signing secret |
+| `GEMINI_API_KEY` | No | Chatbot integration |
+| `STRIPE_API_KEY` | No | Stripe checkout/status |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | Register new user |
-| POST | `/api/auth/login` | User login |
-| POST | `/api/auth/logout` | User logout |
-| GET | `/api/auth/me` | Get current user |
+### Security/performance controls (backend)
+| Variable | Default | Purpose |
+|---|---:|---|
+| `CORS_ALLOWED_ORIGINS` | localhost + prod URL | strict CORS allowlist |
+| `ENABLE_SEED_ENDPOINT` | `false` | protect `/api/seed` |
+| `ENABLE_DEMO_PAYMENT_ROUTES` | `false` | protect demo payment routes |
+| `ENABLE_DEMO_USERS` | `false` | enable demo users (optional) |
+| `BCRYPT_ROUNDS` | `10` | password hash cost |
+| `AUTH_USER_CACHE_TTL_SECONDS` | `120` | auth profile cache TTL |
+| `PUBLIC_ENDPOINT_CACHE_TTL_SECONDS` | `90` | catalog endpoint cache TTL |
+| `MONGO_MAX_POOL_SIZE` | `120` | DB connection pool size |
+| `REPORT_FILE_ALLOWED_HOSTS` | empty | allowlist for report file URL hosts |
 
-### Doctor Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/doctors` | Get all doctors |
-| GET | `/api/doctors/{id}` | Get doctor by ID |
-| POST | `/api/doctors` | Create doctor (Admin) |
-| PUT | `/api/doctors/{id}` | Update doctor (Admin) |
-| DELETE | `/api/doctors/{id}` | Delete doctor (Admin) |
-
-### Appointment Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/appointments` | Get user appointments |
-| POST | `/api/appointments` | Book appointment |
-| PUT | `/api/appointments/{id}` | Update appointment |
-| DELETE | `/api/appointments/{id}` | Cancel appointment |
-
-### Payment Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/payments/create-checkout` | Create Stripe session |
-| GET | `/api/payments/status/{session_id}` | Get payment status |
-| GET | `/api/payments/history` | Get payment history |
-
-### WebSocket Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| WS `/api/ws/{user_id}` | WebSocket connection |
-
-*For complete API documentation, run the backend and visit: `http://localhost:8001/docs`*
+### Frontend
+| Variable | Required | Purpose |
+|---|---|---|
+| `REACT_APP_BACKEND_URL` | Yes (for prod build) | backend base URL |
 
 ---
 
-## 👥 User Roles
+## Build, Deploy, Verify
 
-### Patient Role
-- Browse doctors and departments
-- Book and manage appointments
-- Access medical records
-- Chat with AI assistant
-- Request ambulance services
-- Purchase health packages
-- Make online payments
+### Backend deploy (Render)
+- Defined in [`render.yaml`](render.yaml):
+  - build: `pip install -r requirements.txt`
+  - start: `uvicorn server:app --host 0.0.0.0 --port $PORT`
 
-### Doctor Role
-- View appointment schedule
-- Access patient records
-- Manage consultations
-- Generate prescriptions
-- Update availability
-- Communicate with patients
+### Frontend deploy (Netlify CLI)
+```bash
+cd frontend
+$env:REACT_APP_BACKEND_URL="https://nirmaya-health-backend-2026.onrender.com"
+npm run build
+cd ..
+npx netlify deploy --prod --dir=frontend/build --site=0a2fd621-29d8-46b8-92c8-e229fd37ab87
+```
 
-### Admin Role
-- Complete system control
-- User management (CRUD)
-- Doctor management (CRUD)
-- Appointment oversight
-- Equipment inventory
-- Analytics and reports
-- System configuration
-- Payment management
+### Post-deploy verification checklist
+1. Frontend serves latest hashed bundle on canonical URL.
+2. Backend `/api/health` is healthy.
+3. `/api/seed` is not publicly usable without explicit enablement and auth.
+4. CORS rejects untrusted origins.
+5. Static assets emit expected cache headers.
+6. Doctors/equipment/auth flows are latency-healthy.
 
 ---
 
-## 📸 Screenshots
+## Testing And Health Checks
 
-### Homepage
-<img width="1880" height="827" alt="image" src="https://github.com/user-attachments/assets/79fa12a2-d26a-450f-b915-c6fa6ce51dea" />
+### Backend compile check
+```bash
+python -m py_compile backend/server.py
+```
 
+### Frontend production build check
+```bash
+npm --prefix frontend run build
+```
 
-### Patient Dashboard
-<img width="1781" height="813" alt="image" src="https://github.com/user-attachments/assets/f83942fc-c032-43d4-b768-19f6d7b44a88" />
-<img width="1603" height="570" alt="image" src="https://github.com/user-attachments/assets/1b5a0290-6937-4944-b8f2-dcb21c34a9af" />
-
-
-### Doctor Portal
-<img width="1725" height="815" alt="image" src="https://github.com/user-attachments/assets/4bf0ae3d-7ddc-47b0-ada7-efb555079d03" />
-
-
-### Admin Panel
-<img width="1735" height="826" alt="image" src="https://github.com/user-attachments/assets/165b1722-cf61-4e37-aec4-16d5f67b84b8" />
-
-
-### Appointment Booking
-<img width="1589" height="819" alt="image" src="https://github.com/user-attachments/assets/64bbfb6c-7cbc-46e8-9ad8-6da66bd357f3" />
-<img width="1546" height="821" alt="image" src="https://github.com/user-attachments/assets/89589f87-6cf5-47ff-b55f-691946b99bfe" />
-<img width="1545" height="821" alt="image" src="https://github.com/user-attachments/assets/46b0aa0f-9884-4b57-8e61-c91073678fc0" />
-
+### Manual runtime checks
+- Health endpoint: `GET /api/health`
+- Auth flow: register/login/me
+- Catalog flow: doctors/equipment load speed
+- Payment flow: create checkout -> status sync
+- Realtime flow: websocket connect and message relay
 
 ---
 
-## 🌐 Deployment
-
-### Frontend (Netlify)
-
-1. **Build the application**
-   ```bash
-   cd frontend
-   npm run build
-   ```
-
-2. **Deploy to Netlify**
-   - Connect your GitHub repository
-   - Set build command: `npm run build`
-   - Set publish directory: `build`
-   - Add environment variables in Netlify dashboard
-
-### Backend (Cloud Platform)
-
-**Recommended: Railway, Render, or Heroku**
-
-1. **Prepare for deployment**
-   - Ensure `requirements.txt` is up to date
-   - Configure production environment variables
-   - Update CORS origins for production
-
-2. **Deploy**
-   - Connect repository to hosting platform
-   - Set Python runtime version
-   - Configure environment variables
-   - Deploy!
-
-### Database (MongoDB Atlas)
-
-- Already cloud-hosted
-- Configure IP whitelist
-- Enable authentication
-- Set up backups
+## Roadmap
+- Expand automated integration tests for authz and CORS.
+- Add distributed cache (Redis) for multi-instance backend scaling.
+- Introduce background workers for non-critical async workflows.
+- Add richer observability dashboards (p95 latency, cache hit ratios, queue depths).
 
 ---
 
-## 🗺️ Roadmap
+Built for real-world healthcare workflow orchestration: secure by default, fast by design, and structured for production operations.
 
-### Phase 1 (Current)
-- [x] Core hospital management features
-- [x] Multi-role authentication
-- [x] Appointment booking system
-- [x] Payment integration
-- [x] AI chatbot
-- [x] Real-time notifications
-
-### Phase 2 (Next)
-- [ ] Video consultation integration
-- [ ] Mobile app (React Native)
-- [ ] Two-factor authentication
-- [ ] Advanced analytics dashboard
-- [ ] Email/SMS notifications
-- [ ] Multi-language support
-
-### Phase 3 (Future)
-- [ ] Prescription management system
-- [ ] Lab test result integration
-- [ ] Insurance claim processing
-- [ ] Telemedicine platform
-- [ ] IoT device integration
-- [ ] ML-based health predictions
-
----
-
-## 🤝 Contributing
-
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-### Development Guidelines
-
-- Follow existing code style
-- Write meaningful commit messages
-- Add comments for complex logic
-- Test thoroughly before submitting
-- Update documentation as needed
-
----
-
-## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
----
-
-## 📧 Contact
-
-**Rounak Saha**
-
-- GitHub: [@RSaha0507](https://github.com/RSaha0507)
-- Email: rs574.cs008@gmail.com
-- LinkedIn: [Rounak Saha](https://linkedin.com/in/rounak-saha-932ab0253)
-
-**Project Link:** [https://github.com/RSaha0507/Nirmaya-Health-Services](https://github.com/RSaha0507/Nirmaya-Health-Services)
-
-**Live Demo:** [https://nirmaya-health-services.netlify.app/](https://nirmaya-health-services.netlify.app/)
-
----
-
-## 🙏 Acknowledgments
-
-- [React](https://reactjs.org/) - Frontend framework
-- [FastAPI](https://fastapi.tiangolo.com/) - Backend framework
-- [MongoDB](https://www.mongodb.com/) - Database
-- [TailwindCSS](https://tailwindcss.com/) - CSS framework
-- [Stripe](https://stripe.com/) - Payment processing
-- [Google Gemini](https://ai.google.dev/) - AI chatbot
-- [Lucide](https://lucide.dev/) - Icon library
-- [Recharts](https://recharts.org/) - Chart library
-
----
-
-<div align="center">
-
-### ⭐ Star this repository if you found it helpful!
-
-**Made with ❤️ by Rounak Saha**
-
-</div>
