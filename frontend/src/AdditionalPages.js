@@ -6,10 +6,7 @@ import {
   Stethoscope, Star, Check, AlertCircle, X, Filter, Plus, Minus,
   Syringe, Pill, Shield, Award, ArrowRight, CheckCircle, CreditCard, Loader
 } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL
-  ? `${process.env.REACT_APP_BACKEND_URL}/api`
-  : '/api';
+import { api, redirectToExternalUrlSafely } from './services/apiClient';
 
 const normalizeRole = (role = '') => {
   const normalized = String(role).toLowerCase();
@@ -20,33 +17,6 @@ const normalizeRole = (role = '') => {
 const hasRole = (user, roles) => {
   const currentRole = normalizeRole(user?.role);
   return roles.map(normalizeRole).includes(currentRole);
-};
-
-const api = {
-  async request(endpoint, options = {}) {
-    const token = localStorage.getItem('token');
-    const headers = { ...options.headers };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (!(options.body instanceof FormData)) {
-      headers['Content-Type'] = 'application/json';
-    }
-    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || 'Request failed');
-    }
-    return response.json();
-  },
-  get: (endpoint) => api.request(endpoint),
-  post: (endpoint, data) => api.request(endpoint, { method: 'POST', body: JSON.stringify(data) }),
-  postForm: async (endpoint, formData) => {
-    const token = localStorage.getItem('token');
-    const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const response = await fetch(`${API_URL}${endpoint}`, { method: 'POST', headers, body: formData });
-    if (!response.ok) throw new Error('Request failed');
-    return response.json();
-  }
 };
 
 const Spinner = () => (
@@ -358,7 +328,12 @@ export const HealthPackagesPage = ({ user, navigateTo, showToast }) => {
       
       // Redirect to Stripe Checkout
       if (response.url) {
-        window.location.href = response.url;
+        const redirected = redirectToExternalUrlSafely(response.url, {
+          allowedHosts: ['checkout.stripe.com', 'buy.stripe.com']
+        });
+        if (!redirected) {
+          throw new Error('Received unsafe checkout URL');
+        }
       } else {
         throw new Error('Failed to create checkout session');
       }

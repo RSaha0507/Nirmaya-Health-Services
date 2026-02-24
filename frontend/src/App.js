@@ -8,36 +8,7 @@ import {
   Hospital, Ambulance, BookOpen, Video, ShieldCheck, Upload, Download, Filter
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || '/api';
-
-// API Helper
-const api = {
-  async request(endpoint, options = {}) {
-    const token = localStorage.getItem('token');
-    const headers = { 'Content-Type': 'application/json', ...options.headers };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    
-    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || 'Request failed');
-    }
-    return response.json();
-  },
-  get: (endpoint) => api.request(endpoint),
-  post: (endpoint, data) => api.request(endpoint, { method: 'POST', body: JSON.stringify(data) }),
-  put: (endpoint, data) => api.request(endpoint, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (endpoint) => api.request(endpoint, { method: 'DELETE' }),
-  postForm: async (endpoint, formData) => {
-    const token = localStorage.getItem('token');
-    const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const response = await fetch(`${API_URL}${endpoint}`, { method: 'POST', headers, body: formData });
-    if (!response.ok) throw new Error('Request failed');
-    return response.json();
-  }
-};
+import { api, setAccessToken } from './services/apiClient';
 
 // Context for global state
 const AppContext = React.createContext();
@@ -367,7 +338,7 @@ const LoginPage = ({ onLogin, navigateTo, showToast }) => {
     setLoading(true);
     try {
       const data = await api.post('/auth/login', { email, password });
-      localStorage.setItem('token', data.token);
+      setAccessToken(data.token);
       onLogin(data.user);
       showToast('Login successful!', 'success');
       navigateTo('home');
@@ -432,7 +403,7 @@ const RegisterPage = ({ onLogin, navigateTo, showToast }) => {
     setLoading(true);
     try {
       const data = await api.post('/auth/register', form);
-      localStorage.setItem('token', data.token);
+      setAccessToken(data.token);
       onLogin(data.user);
       showToast('Registration successful!', 'success');
       navigateTo('home');

@@ -18,24 +18,83 @@ import string
 from motor.motor_asyncio import AsyncIOMotorClient
 import httpx
 import stripe
+from urllib.parse import urlparse
 
 app = FastAPI(title="Nirmaya Health Services API", version="3.0.0")
+
+def parse_csv_env(name: str, default: str = "") -> List[str]:
+    raw = os.environ.get(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+def parse_bool_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+def normalize_origin(origin: str) -> Optional[str]:
+    value = (origin or "").strip()
+    if not value:
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc.lower()}"
+
+def parse_cors_origins() -> List[str]:
+    default_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://nirmaya-health-services.netlify.app",
+    ]
+    configured = parse_csv_env("CORS_ALLOWED_ORIGINS", ",".join(default_origins))
+    sanitized: List[str] = []
+    for item in configured:
+        if item == "*":
+            continue
+        normalized = normalize_origin(item)
+        if normalized and normalized not in sanitized:
+            sanitized.append(normalized)
+    return sanitized or default_origins
+
+def normalize_host_value(value: str) -> Optional[str]:
+    raw = (value or "").strip()
+    if not raw or raw == "*":
+        return None
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    host = (parsed.hostname or "").strip().lower().strip(".")
+    return host or None
+
+# Core runtime configuration
+MONGO_URL = os.environ.get("MONGO_URL")
+JWT_SECRET = os.environ.get("JWT_SECRET")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+CORS_ALLOWED_ORIGINS = parse_cors_origins()
+ENABLE_SEED_ENDPOINT = parse_bool_env("ENABLE_SEED_ENDPOINT", False)
+ENABLE_DEMO_PAYMENT_ROUTES = parse_bool_env("ENABLE_DEMO_PAYMENT_ROUTES", False)
+ENABLE_DEMO_USERS = parse_bool_env("ENABLE_DEMO_USERS", False)
+ALLOW_INSECURE_DEMO_CREDENTIALS = parse_bool_env("ALLOW_INSECURE_DEMO_CREDENTIALS", False)
+TRUSTED_ORIGINS = set(CORS_ALLOWED_ORIGINS)
+REPORT_FILE_ALLOWED_HOSTS = {
+    host for host in (normalize_host_value(item) for item in parse_csv_env("REPORT_FILE_ALLOWED_HOSTS")) if host
+}
+
+if not MONGO_URL:
+    raise RuntimeError("Missing required environment variable: MONGO_URL")
+if not JWT_SECRET:
+    raise RuntimeError("Missing required environment variable: JWT_SECRET")
 
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # MongoDB Connection
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://nirmaya_admin:nirmaya%40admin12345@cluster0.uev8tun.mongodb.net/nirmaya_health?retryWrites=true&w=majority&appName=Cluster0")
-JWT_SECRET = os.environ.get("JWT_SECRET", "nirmaya_health_secret_key_2025_secure")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "sk_test_12345")
-
 client = AsyncIOMotorClient(MONGO_URL)
 db = client.nirmaya_health
 
@@ -321,6 +380,95 @@ def normalize_role(role: Optional[str]) -> str:
 
 def has_any_role(user: dict, allowed_roles: List[str]) -> bool:
     return normalize_role(user.get("role")) in {normalize_role(role) for role in allowed_roles}
+
+def is_admin_user(user: Optional[dict]) -> bool:
+    return normalize_role((user or {}).get("role")) == "admin"
+
+def can_manage_payments(user: dict) -> bool:
+    return has_any_role(user, ["admin", "hospital_administrator"])
+
+def ensure_payment_access(payment_doc: dict, current_user: dict):
+    if can_manage_payments(current_user):
+        return
+    if payment_doc.get("user_id") != current_user.get("id"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+def extract_bearer_token(authorization_header: Optional[str]) -> Optional[str]:
+    if not authorization_header:
+        return None
+    prefix, _, token = authorization_header.partition(" ")
+    if prefix.lower() != "bearer":
+        return None
+    token = token.strip()
+    return token or None
+
+def ensure_demo_payment_routes_enabled():
+    if not ENABLE_DEMO_PAYMENT_ROUTES:
+        raise HTTPException(status_code=404, detail="Not found")
+
+def ensure_trusted_origin(origin_url: str) -> str:
+    normalized = normalize_origin(origin_url)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Invalid origin URL")
+    if normalized not in TRUSTED_ORIGINS:
+        raise HTTPException(status_code=400, detail="Untrusted origin URL")
+    return normalized
+
+def host_matches_allowlist(host: str, allowlist: set) -> bool:
+    lowered = (host or "").lower()
+    return any(lowered == allowed or lowered.endswith(f".{allowed}") for allowed in allowlist)
+
+def sanitize_report_file_url(file_url: str) -> str:
+    raw = (file_url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Report file URL is required")
+
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid report file URL")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="Invalid report file URL")
+
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise HTTPException(status_code=400, detail="Invalid report file URL")
+    if REPORT_FILE_ALLOWED_HOSTS and not host_matches_allowlist(host, REPORT_FILE_ALLOWED_HOSTS):
+        raise HTTPException(status_code=400, detail="Report file host not allowed")
+
+    return parsed._replace(fragment="").geturl()
+
+def sanitize_report_doc(report: dict) -> dict:
+    item = serialize_doc(report)
+    try:
+        item["file_url"] = sanitize_report_file_url(item.get("file_url", ""))
+    except HTTPException:
+        item["file_url"] = ""
+    return item
+
+async def authenticate_websocket_user(websocket: WebSocket, expected_user_id: str) -> Optional[dict]:
+    token = websocket.query_params.get("token") or extract_bearer_token(websocket.headers.get("authorization"))
+    if not token:
+        await websocket.close(code=1008)
+        return None
+
+    try:
+        token_data = decode_token(token)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return None
+
+    token_user_id = token_data.get("user_id")
+    if token_user_id != expected_user_id:
+        await websocket.close(code=1008)
+        return None
+
+    user = await users_collection.find_one({"id": token_user_id})
+    if not user:
+        user = await doctors_collection.find_one({"id": token_user_id})
+    if not user:
+        await websocket.close(code=1008)
+        return None
+    return user
 
 def slugify(value: str) -> str:
     return "-".join(
@@ -983,11 +1131,14 @@ async def verify_payment(
     razorpay_signature: str = Form(...),
     current_user: dict = Depends(get_current_user)
 ):
+    ensure_demo_payment_routes_enabled()
+
     # In production, verify with Razorpay
     # For demo, we'll simulate successful payment
     payment = await payments_collection.find_one({"id": payment_id})
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    ensure_payment_access(payment, current_user)
     
     await payments_collection.update_one({"id": payment_id}, {
         "$set": {
@@ -1022,9 +1173,12 @@ async def get_payment_history(current_user: dict = Depends(get_current_user)):
 # Simulate payment for demo
 @app.post("/api/payments/simulate")
 async def simulate_payment(payment_id: str = Form(...), current_user: dict = Depends(get_current_user)):
+    ensure_demo_payment_routes_enabled()
+
     payment = await payments_collection.find_one({"id": payment_id})
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    ensure_payment_access(payment, current_user)
     
     await payments_collection.update_one({"id": payment_id}, {
         "$set": {
@@ -1657,15 +1811,20 @@ async def get_conversations(current_user: dict = Depends(get_current_user)):
 
 @app.websocket("/api/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
-    await manager.connect(websocket, user_id)
+    authenticated_user = await authenticate_websocket_user(websocket, user_id)
+    if not authenticated_user:
+        return
+
+    bound_user_id = authenticated_user["id"]
+    await manager.connect(websocket, bound_user_id)
     try:
         while True:
             data = await websocket.receive_json()
             if data.get("type") == "message":
                 message_doc = {
                     "id": str(uuid.uuid4()),
-                    "sender_id": user_id,
-                    "sender_name": data.get("sender_name", "Unknown"),
+                    "sender_id": bound_user_id,
+                    "sender_name": authenticated_user.get("name", "Unknown"),
                     "receiver_id": data["receiver_id"],
                     "content": data["content"],
                     "created_at": datetime.utcnow().isoformat(),
@@ -1673,9 +1832,11 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                 }
                 await messages_collection.insert_one(message_doc)
                 await manager.send_personal_message(serialize_doc(message_doc), data["receiver_id"])
-                await manager.send_personal_message(serialize_doc(message_doc), user_id)
+                await manager.send_personal_message(serialize_doc(message_doc), bound_user_id)
     except WebSocketDisconnect:
-        manager.disconnect(websocket, user_id)
+        pass
+    finally:
+        manager.disconnect(websocket, bound_user_id)
 
 # ==================== EQUIPMENT ====================
 @app.get("/api/equipment")
@@ -1709,7 +1870,7 @@ async def get_reports(current_user: dict = Depends(get_current_user)):
         reports = await reports_collection.find().to_list(500)
     else:
         reports = await reports_collection.find({"patient_id": current_user["id"]}).to_list(100)
-    return [serialize_doc(r) for r in reports]
+    return [sanitize_report_doc(r) for r in reports]
 
 @app.post("/api/reports")
 async def upload_report(
@@ -1722,7 +1883,8 @@ async def upload_report(
 ):
     if not has_any_role(current_user, ["admin", "staff", "doctor", "nurse", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Staff access required")
-    
+    safe_file_url = sanitize_report_file_url(file_url)
+
     report_id = str(uuid.uuid4())
     report_doc = {
         "id": report_id,
@@ -1730,7 +1892,7 @@ async def upload_report(
         "report_type": report_type,
         "report_name": report_name,
         "notes": notes,
-        "file_url": file_url,
+        "file_url": safe_file_url,
         "uploaded_by": current_user["id"],
         "uploaded_by_name": current_user["name"],
         "created_at": datetime.utcnow().isoformat()
@@ -1994,7 +2156,12 @@ async def chat_with_ai(message: str = Form(...), history: str = Form("[]")):
 
 # ==================== SEED DATA ====================
 @app.post("/api/seed")
-async def seed_data():
+async def seed_data(current_user: dict = Depends(get_current_user)):
+    if not ENABLE_SEED_ENDPOINT:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     # Check if admin exists
     admin = await users_collection.find_one({"role": "admin"})
     if not admin:
@@ -2175,9 +2342,10 @@ async def create_checkout_session(
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Invalid amount")
         
-        # Build URLs from provided origin (NEVER hardcode)
-        success_url = f"{payment_data.origin_url}/payment-success?session_id={{CHECKOUT_SESSION_ID}}"
-        cancel_url = f"{payment_data.origin_url}/payment-cancel"
+        # Build URLs from trusted frontend origins only.
+        trusted_origin = ensure_trusted_origin(payment_data.origin_url)
+        success_url = f"{trusted_origin}/payment-success?session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = f"{trusted_origin}/payment-cancel"
         
         # Create Stripe checkout session
         checkout_session = stripe.checkout.Session.create(
@@ -2224,13 +2392,16 @@ async def create_checkout_session(
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/payments/status/{session_id}")
-async def get_payment_status(session_id: str):
+async def get_payment_status(session_id: str, current_user: dict = Depends(get_current_user)):
     """Get the status of a payment"""
     try:
         # Check local database first
         transaction = await payment_transactions_collection.find_one({"session_id": session_id}, {"_id": 0})
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Payment session not found")
+        ensure_payment_access(transaction, current_user)
         
-        if transaction and transaction.get("payment_status") == "paid":
+        if transaction.get("payment_status") == "paid":
             return {
                 "status": "complete",
                 "payment_status": "paid",
@@ -2245,7 +2416,7 @@ async def get_payment_status(session_id: str):
         # Update local database
         new_status = "paid" if checkout_session.payment_status == "paid" else checkout_session.payment_status
         
-        if transaction and transaction.get("payment_status") != new_status:
+        if transaction.get("payment_status") != new_status:
             await payment_transactions_collection.update_one(
                 {"session_id": session_id},
                 {
@@ -2258,7 +2429,7 @@ async def get_payment_status(session_id: str):
             )
             
             # If paid, update the related item
-            if new_status == "paid" and transaction:
+            if new_status == "paid":
                 await process_successful_payment(transaction)
         
         return {

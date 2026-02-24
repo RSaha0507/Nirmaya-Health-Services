@@ -21,10 +21,14 @@ import {
   PaymentCancelPage
 } from './AdditionalPages';
 import './App.css';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL
-  ? `${process.env.REACT_APP_BACKEND_URL}/api`
-  : '/api';
+import {
+  api,
+  getAccessToken,
+  setAccessToken,
+  clearAccessToken,
+  openExternalUrlSafely,
+  buildWebSocketUrl
+} from './services/apiClient';
 
 const normalizeRole = (role = '') => {
   const normalized = String(role).toLowerCase();
@@ -42,37 +46,6 @@ const getPrimaryDashboardRoute = (user) => {
   if (hasRole(user, ['admin', 'hospital_administrator', 'staff', 'nurse'])) return 'operations';
   if (hasRole(user, ['doctor'])) return 'doctor-portal';
   return 'dashboard';
-};
-
-// API Helper
-const api = {
-  async request(endpoint, options = {}) {
-    const token = localStorage.getItem('token');
-    const headers = { ...options.headers };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (!(options.body instanceof FormData)) {
-      headers['Content-Type'] = 'application/json';
-    }
-    
-    const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || 'Request failed');
-    }
-    return response.json();
-  },
-  get: (endpoint) => api.request(endpoint),
-  post: (endpoint, data) => api.request(endpoint, { method: 'POST', body: JSON.stringify(data) }),
-  put: (endpoint, data) => api.request(endpoint, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (endpoint) => api.request(endpoint, { method: 'DELETE' }),
-  postForm: async (endpoint, formData) => {
-    const token = localStorage.getItem('token');
-    const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const response = await fetch(`${API_URL}${endpoint}`, { method: 'POST', headers, body: formData });
-    if (!response.ok) throw new Error('Request failed');
-    return response.json();
-  }
 };
 
 // Toast Component
@@ -398,7 +371,7 @@ const LoginPage = ({ onLogin, navigateTo, showToast }) => {
     setLoading(true);
     try {
       const data = await api.post('/auth/login', { email, password });
-      localStorage.setItem('token', data.token);
+      setAccessToken(data.token);
       onLogin(data.user);
       showToast('Login successful!', 'success');
       navigateTo(getPrimaryDashboardRoute(data.user));
@@ -463,7 +436,7 @@ const RegisterPage = ({ onLogin, navigateTo, showToast }) => {
     setLoading(true);
     try {
       const data = await api.post('/auth/register', form);
-      localStorage.setItem('token', data.token);
+      setAccessToken(data.token);
       onLogin(data.user);
       showToast('Registration successful!', 'success');
       navigateTo('home');
@@ -1012,7 +985,14 @@ const PatientDashboard = ({ user, navigateTo, showToast }) => {
                       <p className="text-sm text-gray-500">{report.report_type}</p>
                     </div>
                   </div>
-                  <button onClick={() => window.open(report.file_url, '_blank')} className="text-teal-600 hover:text-teal-700">
+                  <button
+                    onClick={() => {
+                      if (!openExternalUrlSafely(report.file_url)) {
+                        showToast('Unable to open report link', 'error');
+                      }
+                    }}
+                    className="text-teal-600 hover:text-teal-700"
+                  >
                     <Download size={20} />
                   </button>
                 </div>
@@ -1702,17 +1682,20 @@ const MessagesPage = ({ user, showToast, pageParams }) => {
   }, [messages]);
 
   useEffect(() => {
-    if (user && API_URL) {
-      const wsUrl = API_URL.replace('https://', 'wss://').replace('http://', 'ws://').replace('/api', '') + `/api/ws/${user.id}`;
-      wsRef.current = new WebSocket(wsUrl);
-      wsRef.current.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.sender_id === activeChat || msg.receiver_id === activeChat) {
-          setMessages(prev => [...prev, msg]);
-        }
-      };
-      return () => wsRef.current?.close();
-    }
+    if (!user?.id) return undefined;
+
+    const token = getAccessToken();
+    if (!token) return undefined;
+
+    const wsUrl = buildWebSocketUrl(`/api/ws/${user.id}`, token);
+    wsRef.current = new WebSocket(wsUrl);
+    wsRef.current.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.sender_id === activeChat || msg.receiver_id === activeChat) {
+        setMessages(prev => [...prev, msg]);
+      }
+    };
+    return () => wsRef.current?.close();
   }, [user, activeChat]);
 
   const loadConversations = async () => {
@@ -1928,7 +1911,14 @@ const ReportsPage = ({ user, showToast }) => {
               {report.notes && <p className="mt-4 text-gray-600 text-sm">{report.notes}</p>}
               <div className="mt-4 pt-4 border-t flex justify-between items-center">
                 <p className="text-xs text-gray-500">{new Date(report.created_at).toLocaleDateString()}</p>
-                <button onClick={() => window.open(report.file_url, '_blank')} className="flex items-center gap-1 text-teal-600 hover:text-teal-700 font-medium">
+                <button
+                  onClick={() => {
+                    if (!openExternalUrlSafely(report.file_url)) {
+                      showToast('Unable to open report link', 'error');
+                    }
+                  }}
+                  className="flex items-center gap-1 text-teal-600 hover:text-teal-700 font-medium"
+                >
                   <Download size={18} /> Download
                 </button>
               </div>
@@ -2131,13 +2121,13 @@ const App = () => {
   };
 
   const checkAuth = async () => {
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     if (token) {
       try {
         const userData = await api.get('/auth/me');
         setUser({ ...userData, role: normalizeRole(userData?.role) });
       } catch (err) {
-        localStorage.removeItem('token');
+        clearAccessToken();
       }
     }
     setLoading(false);
@@ -2169,7 +2159,7 @@ const App = () => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
+    clearAccessToken();
     setUser(null);
     showToast('Logged out successfully', 'success');
     navigateTo('home');
