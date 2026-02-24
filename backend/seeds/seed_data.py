@@ -12,7 +12,8 @@ import bcrypt
 import uuid
 from datetime import datetime, timedelta
 
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://nirmaya_admin:nirmaya%40admin12345@cluster0.uev8tun.mongodb.net/nirmaya_health?retryWrites=true&w=majority&appName=Cluster0")
+MONGO_URL = os.environ.get("MONGO_URL")
+MONGO_DB_NAME = os.environ.get("MONGO_DB_NAME", "nirmaya_health")
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -673,8 +674,11 @@ SAMPLE_AMBULANCES = [
 ]
 
 async def seed_database():
+    if not MONGO_URL:
+        raise RuntimeError("MONGO_URL environment variable is required to seed the database.")
+
     client = AsyncIOMotorClient(MONGO_URL)
-    db = client.nirmaya_health
+    db = client[MONGO_DB_NAME]
     
     print("🌱 Starting database seeding...")
     
