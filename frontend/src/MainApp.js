@@ -1,5 +1,5 @@
 // src/MainApp.js - Complete Enhanced Nirmaya Health Services Application
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   HeartPulse, Stethoscope, Calendar, Users, Activity, FileText, MessageSquare,
   Settings, LogOut, LogIn, UserPlus, Home, Info, Phone, Menu, X, ChevronDown,
@@ -26,6 +26,9 @@ import {
   getAccessToken,
   setAccessToken,
   clearAccessToken,
+  getCachedUserProfile,
+  setCachedUserProfile,
+  clearCachedUserProfile,
   openExternalUrlSafely,
   buildWebSocketUrl
 } from './services/apiClient';
@@ -46,6 +49,65 @@ const getPrimaryDashboardRoute = (user) => {
   if (hasRole(user, ['admin', 'hospital_administrator', 'staff', 'nurse'])) return 'operations';
   if (hasRole(user, ['doctor'])) return 'doctor-portal';
   return 'dashboard';
+};
+
+const PAGE_PATHS = {
+  home: '/',
+  about: '/about',
+  login: '/login',
+  register: '/register',
+  doctors: '/doctors',
+  appointments: '/appointments',
+  equipment: '/equipment',
+  dashboard: '/dashboard',
+  'doctor-portal': '/doctor-portal',
+  admin: '/admin',
+  operations: '/operations',
+  profile: '/profile',
+  messages: '/messages',
+  reports: '/reports',
+  departments: '/departments',
+  'health-packages': '/health-packages',
+  beds: '/beds',
+  'lab-tests': '/lab-tests',
+  ambulance: '/ambulance',
+  inventory: '/inventory',
+  'payment-success': '/payment-success',
+  'payment-cancel': '/payment-cancel'
+};
+
+const PATH_TO_PAGE = Object.entries(PAGE_PATHS).reduce((map, [page, path]) => {
+  map[path] = page;
+  return map;
+}, {});
+
+const getRouteFromLocation = () => {
+  const path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+  const page = PATH_TO_PAGE[path] || 'home';
+  const search = new URLSearchParams(window.location.search || '');
+  const params = {};
+
+  const department = search.get('department');
+  if (department) params.department = department;
+  const doctorId = search.get('doctorId');
+  if (doctorId) params.doctorId = doctorId;
+  const chatWith = search.get('chatWith');
+  if (chatWith) params.chatWith = chatWith;
+  if (page === 'home' && search.get('session_id')) {
+    return { page: 'payment-success', params };
+  }
+
+  return { page, params };
+};
+
+const buildRouteUrl = (page, params = {}) => {
+  const path = PAGE_PATHS[page] || '/';
+  const search = new URLSearchParams();
+  if (params.department) search.set('department', params.department);
+  if (params.doctorId) search.set('doctorId', params.doctorId);
+  if (params.chatWith) search.set('chatWith', params.chatWith);
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
 };
 
 // Toast Component
@@ -373,8 +435,6 @@ const LoginPage = ({ onLogin, navigateTo, showToast }) => {
       const data = await api.post('/auth/login', { email, password });
       setAccessToken(data.token);
       onLogin(data.user);
-      showToast('Login successful!', 'success');
-      navigateTo(getPrimaryDashboardRoute(data.user));
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -438,8 +498,6 @@ const RegisterPage = ({ onLogin, navigateTo, showToast }) => {
       const data = await api.post('/auth/register', form);
       setAccessToken(data.token);
       onLogin(data.user);
-      showToast('Registration successful!', 'success');
-      navigateTo('home');
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -2096,50 +2154,54 @@ const AboutPage = () => (
 
 // Main App Component
 const App = () => {
-  const [currentPage, setCurrentPage] = useState('home');
-  const [pageParams, setPageParams] = useState({});
+  const initialRoute = getRouteFromLocation();
+  const [currentPage, setCurrentPage] = useState(initialRoute.page);
+  const [pageParams, setPageParams] = useState(initialRoute.params);
   const [user, setUser] = useState(null);
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    checkAuth();
-    seedData();
-    handleUrlRouting();
-  }, []);
+    const syncRouteFromLocation = () => {
+      const route = getRouteFromLocation();
+      setCurrentPage(route.page);
+      setPageParams(route.params);
+    };
 
-  // Handle URL-based routing for payment callbacks
-  const handleUrlRouting = () => {
-    const path = window.location.pathname;
-    const urlParams = new URLSearchParams(window.location.search);
-    
-    if (path === '/payment-success' || urlParams.get('session_id')) {
-      setCurrentPage('payment-success');
-    } else if (path === '/payment-cancel') {
-      setCurrentPage('payment-cancel');
-    }
-  };
+    window.addEventListener('popstate', syncRouteFromLocation);
+    syncRouteFromLocation();
 
-  const checkAuth = async () => {
-    const token = getAccessToken();
-    if (token) {
+    const bootstrapAuth = async () => {
+      const token = getAccessToken();
+      const cachedProfile = getCachedUserProfile();
+
+      if (cachedProfile) {
+        setUser({ ...cachedProfile, role: normalizeRole(cachedProfile?.role) });
+      }
+      setLoading(false);
+
+      if (!token) {
+        clearCachedUserProfile();
+        return;
+      }
+
       try {
-        const userData = await api.get('/auth/me');
-        setUser({ ...userData, role: normalizeRole(userData?.role) });
+        const userData = await api.get('/auth/me', { force: true, cacheTtlMs: 20000 });
+        const normalizedUser = { ...userData, role: normalizeRole(userData?.role) };
+        setUser(normalizedUser);
+        setCachedUserProfile(normalizedUser);
       } catch (err) {
         clearAccessToken();
+        setUser(null);
       }
-    }
-    setLoading(false);
-  };
+    };
 
-  const seedData = async () => {
-    try {
-      await api.post('/seed', {});
-    } catch (err) {
-      console.log('Seed data already exists');
-    }
-  };
+    bootstrapAuth();
+
+    return () => {
+      window.removeEventListener('popstate', syncRouteFromLocation);
+    };
+  }, []);
 
   const showToast = (message, type) => {
     setToast({ message, type });
@@ -2147,34 +2209,40 @@ const App = () => {
   };
 
   const navigateTo = (page, params = {}) => {
-    setCurrentPage(page);
-    setPageParams(params);
-    // Update URL for payment pages
-    if (page === 'payment-success' || page === 'payment-cancel') {
-      window.history.pushState({}, '', `/${page}`);
-    } else {
-      window.history.pushState({}, '', '/');
+    const destination = buildRouteUrl(page, params);
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (destination === current) {
+      setCurrentPage(page);
+      setPageParams(params);
+      window.scrollTo(0, 0);
+      return;
     }
-    window.scrollTo(0, 0);
+    // MPA-style navigation: each major route transition performs a full document load.
+    window.location.assign(destination);
   };
 
   const handleLogout = () => {
     clearAccessToken();
-    setUser(null);
-    showToast('Logged out successfully', 'success');
-    navigateTo('home');
+    window.location.assign(PAGE_PATHS.home);
   };
 
   const handleLogin = (userData) => {
-    setUser({ ...userData, role: normalizeRole(userData?.role) });
+    const normalizedUser = { ...userData, role: normalizeRole(userData?.role) };
+    setUser(normalizedUser);
+    setCachedUserProfile(normalizedUser);
+    window.location.assign(buildRouteUrl(getPrimaryDashboardRoute(normalizedUser)));
   };
 
   const handleUserUpdate = (updatedUser) => {
-    setUser((current) => ({
+    setUser((current) => {
+      const merged = {
       ...current,
       ...updatedUser,
       role: normalizeRole(updatedUser?.role || current?.role),
-    }));
+      };
+      setCachedUserProfile(merged);
+      return merged;
+    });
   };
 
   if (loading) return <div className="flex items-center justify-center h-screen"><Spinner /></div>;

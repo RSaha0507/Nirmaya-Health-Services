@@ -15,6 +15,8 @@ import json
 import asyncio
 import random
 import string
+import time
+import re
 from motor.motor_asyncio import AsyncIOMotorClient
 import httpx
 import stripe
@@ -31,6 +33,15 @@ def parse_bool_env(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+def parse_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
 
 def normalize_origin(origin: str) -> Optional[str]:
     value = (origin or "").strip()
@@ -76,6 +87,9 @@ ENABLE_DEMO_PAYMENT_ROUTES = parse_bool_env("ENABLE_DEMO_PAYMENT_ROUTES", False)
 ENABLE_DEMO_USERS = parse_bool_env("ENABLE_DEMO_USERS", False)
 ALLOW_INSECURE_DEMO_CREDENTIALS = parse_bool_env("ALLOW_INSECURE_DEMO_CREDENTIALS", False)
 TRUSTED_ORIGINS = set(CORS_ALLOWED_ORIGINS)
+BCRYPT_ROUNDS = max(4, parse_int_env("BCRYPT_ROUNDS", 12))
+AUTH_USER_CACHE_TTL_SECONDS = max(0, parse_int_env("AUTH_USER_CACHE_TTL_SECONDS", 120))
+MONGO_MAX_POOL_SIZE = max(20, parse_int_env("MONGO_MAX_POOL_SIZE", 120))
 REPORT_FILE_ALLOWED_HOSTS = {
     host for host in (normalize_host_value(item) for item in parse_csv_env("REPORT_FILE_ALLOWED_HOSTS")) if host
 }
@@ -95,7 +109,15 @@ app.add_middleware(
 )
 
 # MongoDB Connection
-client = AsyncIOMotorClient(MONGO_URL)
+client = AsyncIOMotorClient(
+    MONGO_URL,
+    maxPoolSize=MONGO_MAX_POOL_SIZE,
+    minPoolSize=5,
+    serverSelectionTimeoutMS=5000,
+    connectTimeoutMS=10000,
+    socketTimeoutMS=20000,
+    retryWrites=True,
+)
 db = client.nirmaya_health
 
 # Collections
@@ -119,8 +141,41 @@ prescriptions_collection = db.prescriptions
 departments_collection = db.departments
 ambulances_collection = db.ambulances
 payment_transactions_collection = db.payment_transactions
+auth_user_cache: Dict[str, Dict[str, Any]] = {}
 
 security = HTTPBearer()
+
+@app.on_event("startup")
+async def startup_optimizations():
+    # Build indexes for hot auth/query paths and warm DB connection.
+    try:
+        await asyncio.gather(
+            users_collection.update_many(
+                {"email_normalized": {"$exists": False}, "email": {"$type": "string"}},
+                [{"$set": {"email_normalized": {"$toLower": "$email"}}}],
+            ),
+            doctors_collection.update_many(
+                {"email_normalized": {"$exists": False}, "email": {"$type": "string"}},
+                [{"$set": {"email_normalized": {"$toLower": "$email"}}}],
+            ),
+        )
+        await asyncio.gather(
+            users_collection.create_index("id"),
+            users_collection.create_index("email"),
+            users_collection.create_index("email_normalized"),
+            doctors_collection.create_index("id"),
+            doctors_collection.create_index("email"),
+            doctors_collection.create_index("email_normalized"),
+            appointments_collection.create_index([("patient_id", 1), ("created_at", -1)]),
+            appointments_collection.create_index([("doctor_id", 1), ("created_at", -1)]),
+            reports_collection.create_index([("patient_id", 1), ("created_at", -1)]),
+            notifications_collection.create_index([("user_id", 1), ("created_at", -1)]),
+            messages_collection.create_index([("sender_id", 1), ("receiver_id", 1), ("created_at", -1)]),
+            payment_transactions_collection.create_index([("session_id", 1)]),
+        )
+        await db.command("ping")
+    except Exception as exc:
+        print(f"Startup optimization warning: {exc}")
 
 # WebSocket Connection Manager
 class ConnectionManager:
@@ -325,10 +380,13 @@ class ReviewCreate(BaseModel):
 
 # ==================== HELPER FUNCTIONS ====================
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode('utf-8')
 
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+def normalize_email(email: str) -> str:
+    return (email or "").strip().lower()
 
 def create_token(user_id: str, role: str) -> str:
     payload = {
@@ -346,14 +404,81 @@ def decode_token(token: str) -> dict:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+def sanitize_user_doc(doc: Optional[dict]) -> Optional[dict]:
+    if not doc:
+        return None
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+def get_cached_auth_user(user_id: str) -> Optional[dict]:
+    if not AUTH_USER_CACHE_TTL_SECONDS:
+        return None
+    entry = auth_user_cache.get(user_id)
+    if not entry:
+        return None
+    if entry.get("expires_at", 0) <= time.monotonic():
+        auth_user_cache.pop(user_id, None)
+        return None
+    return dict(entry["user"])
+
+def set_cached_auth_user(user: Optional[dict]):
+    if not user or not AUTH_USER_CACHE_TTL_SECONDS:
+        return
+    user_id = user.get("id")
+    if not user_id:
+        return
+    auth_user_cache[user_id] = {
+        "expires_at": time.monotonic() + AUTH_USER_CACHE_TTL_SECONDS,
+        "user": sanitize_user_doc(user),
+    }
+
+def invalidate_cached_auth_user(user_id: Optional[str]):
+    if not user_id:
+        return
+    auth_user_cache.pop(user_id, None)
+
+async def fetch_user_by_id(user_id: str, include_password: bool = False) -> Optional[dict]:
+    projection = None if include_password else {"password": 0}
+    user = await users_collection.find_one({"id": user_id}, projection)
+    if user:
+        return user
+    return await doctors_collection.find_one({"id": user_id}, projection)
+
+async def find_account_by_email(email: str) -> Optional[dict]:
+    normalized = normalize_email(email)
+    query = {"$or": [{"email_normalized": normalized}, {"email": normalized}]}
+    user = await users_collection.find_one(query)
+    if user:
+        return user
+    doctor = await doctors_collection.find_one(query)
+    if doctor:
+        return doctor
+
+    # Backward-compatible fallback for old mixed-case records.
+    escaped = re.escape((email or "").strip())
+    if not escaped:
+        return None
+    regex_query = {"email": {"$regex": f"^{escaped}$", "$options": "i"}}
+    user = await users_collection.find_one(regex_query)
+    if user:
+        return user
+    return await doctors_collection.find_one(regex_query)
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token_data = decode_token(credentials.credentials)
-    user = await users_collection.find_one({"id": token_data["user_id"]})
-    if not user:
-        user = await doctors_collection.find_one({"id": token_data["user_id"]})
+    user_id = token_data.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    cached_user = get_cached_auth_user(user_id)
+    if cached_user:
+        return cached_user
+
+    user = await fetch_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
-    return user
+    sanitized = sanitize_user_doc(user)
+    set_cached_auth_user(sanitized)
+    return sanitized
 
 def serialize_doc(doc):
     if doc is None:
@@ -462,12 +587,11 @@ async def authenticate_websocket_user(websocket: WebSocket, expected_user_id: st
         await websocket.close(code=1008)
         return None
 
-    user = await users_collection.find_one({"id": token_user_id})
-    if not user:
-        user = await doctors_collection.find_one({"id": token_user_id})
+    user = await fetch_user_by_id(token_user_id)
     if not user:
         await websocket.close(code=1008)
         return None
+    set_cached_auth_user(user)
     return user
 
 def slugify(value: str) -> str:
@@ -528,12 +652,18 @@ async def insert_missing_documents(collection, documents: List[dict], unique_fie
     inserted = 0
     for doc in documents:
         unique_value = doc.get(unique_field)
+        if unique_field == "email":
+            unique_value = normalize_email(unique_value or "")
         if not unique_value:
             continue
         existing = await collection.find_one({unique_field: unique_value}, {"_id": 1})
         if existing:
             continue
         payload = dict(doc)
+        if payload.get("email"):
+            normalized_email = normalize_email(payload["email"])
+            payload["email"] = normalized_email
+            payload["email_normalized"] = normalized_email
         payload.setdefault("created_at", datetime.utcnow().isoformat())
         await collection.insert_one(payload)
         inserted += 1
@@ -563,12 +693,15 @@ async def ensure_operational_demo_users() -> int:
     ]
     changes = 0
     for demo in demo_users:
-        before = await users_collection.find_one({"email": demo["email"]}, {"_id": 1})
+        normalized_email = normalize_email(demo["email"])
+        before = await users_collection.find_one({"email_normalized": normalized_email}, {"_id": 1})
         await users_collection.update_one(
-            {"email": demo["email"]},
+            {"email_normalized": normalized_email},
             {
                 "$set": {
                     "name": demo["name"],
+                    "email": normalized_email,
+                    "email_normalized": normalized_email,
                     "role": demo["role"],
                     "password": hash_password(demo["password"]),
                     "updated_at": now,
@@ -631,6 +764,14 @@ async def create_notification(user_id: str, title: str, message: str, notificati
     await notifications_collection.insert_one(notification)
     await manager.send_personal_message({"type": "notification", "data": notification}, user_id)
     return notification
+
+def schedule_notification(user_id: str, title: str, message: str, notification_type: str, data: Optional[dict] = None):
+    async def _runner():
+        try:
+            await create_notification(user_id, title, message, notification_type, data)
+        except Exception as exc:
+            print(f"Notification scheduling warning: {exc}")
+    asyncio.create_task(_runner())
 
 # ==================== HEALTH CHECK ====================
 @app.get("/api/health")
@@ -827,7 +968,8 @@ async def update_ambulance_request_status(
 # ==================== AUTH ROUTES ====================
 @app.post("/api/auth/register")
 async def register(user: UserCreate):
-    existing = await users_collection.find_one({"email": user.email})
+    normalized_email = normalize_email(str(user.email))
+    existing = await find_account_by_email(normalized_email)
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
     
@@ -835,7 +977,8 @@ async def register(user: UserCreate):
     user_doc = {
         "id": user_id,
         "name": user.name,
-        "email": user.email,
+        "email": normalized_email,
+        "email_normalized": normalized_email,
         "password": hash_password(user.password),
         "phone": user.phone,
         "role": "patient",
@@ -850,33 +993,34 @@ async def register(user: UserCreate):
         "notification_preferences": {"email": True, "push": True, "sms": True}
     }
     await users_collection.insert_one(user_doc)
+    set_cached_auth_user(user_doc)
     
-    # Send welcome notification
-    await create_notification(user_id, "Welcome to Nirmaya Health!", 
-        "Your account has been created successfully. Complete your profile for better service.", "welcome")
+    # Do not block registration response on non-critical notification writes.
+    schedule_notification(
+        user_id,
+        "Welcome to Nirmaya Health!",
+        "Your account has been created successfully. Complete your profile for better service.",
+        "welcome",
+    )
     
     token = create_token(user_id, "patient")
-    return {"token": token, "user": {"id": user_id, "name": user.name, "email": user.email, "role": "patient"}}
+    return {"token": token, "user": {"id": user_id, "name": user.name, "email": normalized_email, "role": "patient"}}
 
 @app.post("/api/auth/login")
 async def login(credentials: UserLogin):
-    user = await users_collection.find_one({"email": credentials.email})
-    role = "patient"
-    
-    if not user:
-        user = await doctors_collection.find_one({"email": credentials.email})
-        role = "doctor" if user else None
+    user = await find_account_by_email(str(credentials.email))
     
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    actual_role = normalize_role(user.get("role", role))
+    actual_role = normalize_role(user.get("role"))
     token = create_token(user["id"], actual_role)
+    set_cached_auth_user(user)
     
     user_response = {
         "id": user["id"],
         "name": user["name"],
-        "email": user["email"],
+        "email": normalize_email(user.get("email", "")),
         "role": actual_role
     }
     if actual_role == "doctor":
@@ -889,6 +1033,9 @@ async def login(credentials: UserLogin):
 async def get_me(current_user: dict = Depends(get_current_user)):
     user_data = {k: v for k, v in current_user.items() if k not in ["password", "_id"]}
     user_data["role"] = normalize_role(user_data.get("role"))
+    if user_data.get("email"):
+        user_data["email"] = normalize_email(user_data["email"])
+    set_cached_auth_user(user_data)
     return user_data
 
 @app.put("/api/auth/profile")
@@ -909,7 +1056,9 @@ async def update_profile(update: UserUpdate, current_user: dict = Depends(get_cu
 
     if not updated:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return {k: v for k, v in updated.items() if k not in ["password", "_id"]}
+    response = {k: v for k, v in updated.items() if k not in ["password", "_id"]}
+    set_cached_auth_user(response)
+    return response
 
 # ==================== NOTIFICATIONS ====================
 @app.get("/api/notifications")
@@ -960,7 +1109,8 @@ async def create_doctor(doctor: DoctorCreate, current_user: dict = Depends(get_c
     if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     
-    existing = await doctors_collection.find_one({"email": doctor.email})
+    normalized_email = normalize_email(str(doctor.email))
+    existing = await find_account_by_email(normalized_email)
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
     
@@ -968,7 +1118,8 @@ async def create_doctor(doctor: DoctorCreate, current_user: dict = Depends(get_c
     doctor_doc = {
         "id": doctor_id,
         "name": doctor.name,
-        "email": doctor.email,
+        "email": normalized_email,
+        "email_normalized": normalized_email,
         "password": hash_password(doctor.password),
         "specialty": doctor.specialty,
         "department": doctor.department,
@@ -2108,6 +2259,7 @@ async def delete_user(user_id: str, current_user: dict = Depends(get_current_use
     if user and user.get("role") == "admin":
         raise HTTPException(status_code=400, detail="Cannot delete admin user")
     await users_collection.delete_one({"id": user_id})
+    invalidate_cached_auth_user(user_id)
     return {"message": "User deleted"}
 
 # ==================== AI CHATBOT ====================
@@ -2166,10 +2318,12 @@ async def seed_data(current_user: dict = Depends(get_current_user)):
     admin = await users_collection.find_one({"role": "admin"})
     if not admin:
         admin_id = str(uuid.uuid4())
+        admin_email = normalize_email("admin@nirmaya.com")
         await users_collection.insert_one({
             "id": admin_id,
             "name": "Admin",
-            "email": "admin@nirmaya.com",
+            "email": admin_email,
+            "email_normalized": admin_email,
             "password": hash_password("admin123"),
             "role": "admin",
             "created_at": datetime.utcnow().isoformat()
@@ -2202,6 +2356,10 @@ async def seed_data(current_user: dict = Depends(get_current_user)):
             {"id": str(uuid.uuid4()), "name": "Dr. Vikram Singh", "email": "vikram@nirmaya.com", "password": hash_password("doctor123"), "specialty": "Orthopedic Surgeon", "department": "Orthopedics", "experience": "18 years", "qualifications": "MS Orthopedics", "certifications": ["FICS"], "bio": "Expert in joint replacement surgery and sports medicine.", "image": "https://images.unsplash.com/photo-1537368910025-700350fe46c7?w=400", "time_slots": ["09:00", "10:00", "14:00", "15:00"], "consultation_fee": 900, "video_consultation_fee": 700, "role": "doctor", "available_for_video": True, "created_at": datetime.utcnow().isoformat()},
             {"id": str(uuid.uuid4()), "name": "Dr. Meera Reddy", "email": "meera@nirmaya.com", "password": hash_password("doctor123"), "specialty": "Dermatologist", "department": "Dermatology", "experience": "8 years", "qualifications": "MD Dermatology", "certifications": ["IADVL"], "bio": "Specializes in cosmetic dermatology and skin cancer treatment.", "image": "https://images.unsplash.com/photo-1651008376811-b90baee60c1f?w=400", "time_slots": ["10:00", "11:00", "12:00", "15:00", "16:00", "17:00"], "consultation_fee": 700, "video_consultation_fee": 500, "role": "doctor", "available_for_video": True, "created_at": datetime.utcnow().isoformat()},
         ]
+        for doctor in doctors_data:
+            normalized_email = normalize_email(doctor.get("email", ""))
+            doctor["email"] = normalized_email
+            doctor["email_normalized"] = normalized_email
         await doctors_collection.insert_many(doctors_data)
     
     # Seed health packages if empty
