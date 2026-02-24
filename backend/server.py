@@ -86,6 +86,7 @@ ENABLE_SEED_ENDPOINT = parse_bool_env("ENABLE_SEED_ENDPOINT", False)
 ENABLE_DEMO_PAYMENT_ROUTES = parse_bool_env("ENABLE_DEMO_PAYMENT_ROUTES", False)
 ENABLE_DEMO_USERS = parse_bool_env("ENABLE_DEMO_USERS", False)
 ALLOW_INSECURE_DEMO_CREDENTIALS = parse_bool_env("ALLOW_INSECURE_DEMO_CREDENTIALS", False)
+ALLOW_BCRYPT_REHASH_DOWNGRADE = parse_bool_env("ALLOW_BCRYPT_REHASH_DOWNGRADE", True)
 TRUSTED_ORIGINS = set(CORS_ALLOWED_ORIGINS)
 BCRYPT_ROUNDS = max(4, parse_int_env("BCRYPT_ROUNDS", 10))
 AUTH_USER_CACHE_TTL_SECONDS = max(0, parse_int_env("AUTH_USER_CACHE_TTL_SECONDS", 120))
@@ -384,6 +385,43 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+def get_bcrypt_rounds(hashed_password: str) -> Optional[int]:
+    parts = (hashed_password or "").split("$")
+    if len(parts) < 3:
+        return None
+    try:
+        return int(parts[2])
+    except ValueError:
+        return None
+
+def should_rehash_password(stored_rounds: Optional[int]) -> bool:
+    if stored_rounds is None or stored_rounds == BCRYPT_ROUNDS:
+        return False
+    if stored_rounds < BCRYPT_ROUNDS:
+        return True
+    return ALLOW_BCRYPT_REHASH_DOWNGRADE
+
+def schedule_password_rehash(user: dict, plain_password: str):
+    user_id = user.get("id")
+    stored_hash = user.get("password")
+    role = normalize_role(user.get("role"))
+    if not user_id or not stored_hash or not should_rehash_password(get_bcrypt_rounds(stored_hash)):
+        return
+
+    collection = doctors_collection if role == "doctor" else users_collection
+
+    async def _runner():
+        try:
+            updated_hash = hash_password(plain_password)
+            await collection.update_one(
+                {"id": user_id, "password": stored_hash},
+                {"$set": {"password": updated_hash, "updated_at": datetime.utcnow().isoformat()}},
+            )
+        except Exception as exc:
+            print(f"Password rehash warning: {exc}")
+
+    asyncio.create_task(_runner())
 
 def normalize_email(email: str) -> str:
     return (email or "").strip().lower()
@@ -1012,6 +1050,7 @@ async def login(credentials: UserLogin):
     
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    schedule_password_rehash(user, credentials.password)
     
     actual_role = normalize_role(user.get("role"))
     token = create_token(user["id"], actual_role)
