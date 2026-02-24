@@ -23,6 +23,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import httpx
 import stripe
 from urllib.parse import urlparse
+try:
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token as google_id_token
+except Exception:
+    google_requests = None
+    google_id_token = None
 
 app = FastAPI(title="Nirmaya Health Services API", version="3.0.0")
 
@@ -83,6 +89,9 @@ MONGO_URL = os.environ.get("MONGO_URL")
 JWT_SECRET = os.environ.get("JWT_SECRET")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+GOOGLE_CLIENT_IDS = {
+    value for value in parse_csv_env("GOOGLE_CLIENT_IDS", os.environ.get("GOOGLE_CLIENT_ID", "")) if value
+}
 CORS_ALLOWED_ORIGINS = parse_cors_origins()
 ENABLE_SEED_ENDPOINT = parse_bool_env("ENABLE_SEED_ENDPOINT", False)
 ENABLE_DEMO_PAYMENT_ROUTES = parse_bool_env("ENABLE_DEMO_PAYMENT_ROUTES", False)
@@ -96,6 +105,14 @@ PUBLIC_ENDPOINT_CACHE_TTL_SECONDS = max(0, parse_int_env("PUBLIC_ENDPOINT_CACHE_
 MONGO_MAX_POOL_SIZE = max(20, parse_int_env("MONGO_MAX_POOL_SIZE", 120))
 REPORT_FILE_ALLOWED_HOSTS = {
     host for host in (normalize_host_value(item) for item in parse_csv_env("REPORT_FILE_ALLOWED_HOSTS")) if host
+}
+BLOCKED_EMAIL_DOMAINS = {
+    domain.strip().lower()
+    for domain in parse_csv_env(
+        "BLOCKED_EMAIL_DOMAINS",
+        "mailinator.com,10minutemail.com,tempmail.com,guerrillamail.com,dispostable.com",
+    )
+    if domain.strip()
 }
 
 if not MONGO_URL:
@@ -239,6 +256,9 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
@@ -446,6 +466,56 @@ def schedule_password_rehash(user: dict, plain_password: str):
 
 def normalize_email(email: str) -> str:
     return (email or "").strip().lower()
+
+def validate_registration_email(email: str) -> Dict[str, Any]:
+    normalized = normalize_email(email)
+    if not normalized:
+        return {"valid": False, "normalized_email": "", "message": "Email is required"}
+    if len(normalized) > 254:
+        return {"valid": False, "normalized_email": normalized, "message": "Email is too long"}
+
+    if not re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", normalized):
+        return {"valid": False, "normalized_email": normalized, "message": "Enter a valid email address"}
+
+    local_part, _, domain = normalized.partition("@")
+    if len(local_part) > 64:
+        return {"valid": False, "normalized_email": normalized, "message": "Email local part is too long"}
+    if ".." in normalized or normalized.startswith(".") or normalized.endswith("."):
+        return {"valid": False, "normalized_email": normalized, "message": "Enter a valid email address"}
+    if domain in BLOCKED_EMAIL_DOMAINS:
+        return {"valid": False, "normalized_email": normalized, "message": "Disposable emails are not allowed"}
+
+    return {"valid": True, "normalized_email": normalized, "message": "Email format looks good"}
+
+async def get_registration_email_status(email: str) -> Dict[str, Any]:
+    verdict = validate_registration_email(email)
+    normalized_email = verdict["normalized_email"]
+    if not verdict["valid"]:
+        return {
+            "valid": False,
+            "available": False,
+            "normalized_email": normalized_email,
+            "message": verdict["message"],
+        }
+
+    existing = await find_account_by_email(normalized_email)
+    if existing:
+        return {
+            "valid": True,
+            "available": False,
+            "normalized_email": normalized_email,
+            "message": "Email is already registered",
+        }
+
+    return {
+        "valid": True,
+        "available": True,
+        "normalized_email": normalized_email,
+        "message": "Email is available",
+    }
+
+def collection_for_role(role: Optional[str]):
+    return doctors_collection if normalize_role(role) == "doctor" else users_collection
 
 def create_token(user_id: str, role: str) -> str:
     payload = {
@@ -1187,12 +1257,18 @@ async def update_ambulance_request_status(
     return {"message": f"Status updated to {status}", "status": status}
 
 # ==================== AUTH ROUTES ====================
+@app.get("/api/auth/validate-email")
+async def validate_email(email: str):
+    return await get_registration_email_status(email)
+
 @app.post("/api/auth/register")
 async def register(user: UserCreate):
-    normalized_email = normalize_email(str(user.email))
-    existing = await find_account_by_email(normalized_email)
-    if existing:
+    email_status = await get_registration_email_status(str(user.email))
+    if not email_status["valid"]:
+        raise HTTPException(status_code=400, detail=email_status["message"])
+    if not email_status["available"]:
         raise HTTPException(status_code=400, detail="Email already registered")
+    normalized_email = email_status["normalized_email"]
     
     user_id = str(uuid.uuid4())
     user_doc = {
@@ -1230,8 +1306,13 @@ async def register(user: UserCreate):
 @app.post("/api/auth/login")
 async def login(credentials: UserLogin):
     user = await find_account_by_email(str(credentials.email))
-    
-    if not user or not verify_password(credentials.password, user["password"]):
+
+    stored_password = (user or {}).get("password")
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not stored_password:
+        raise HTTPException(status_code=401, detail="This account uses Google sign-in. Continue with Google.")
+    if not verify_password(credentials.password, stored_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     schedule_password_rehash(user, credentials.password)
     
@@ -1249,6 +1330,123 @@ async def login(credentials: UserLogin):
         user_response["specialty"] = user.get("specialty")
         user_response["department"] = user.get("department")
     
+    return {"token": token, "user": user_response}
+
+@app.post("/api/auth/google")
+async def google_auth(payload: GoogleAuthRequest):
+    if not GOOGLE_CLIENT_IDS:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    if google_requests is None or google_id_token is None:
+        raise HTTPException(status_code=503, detail="Google auth libraries are unavailable")
+
+    token_value = (payload.id_token or "").strip()
+    if not token_value:
+        raise HTTPException(status_code=400, detail="Google ID token is required")
+
+    try:
+        id_info = google_id_token.verify_oauth2_token(
+            token_value,
+            google_requests.Request(),
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    audience = str(id_info.get("aud", ""))
+    if audience not in GOOGLE_CLIENT_IDS:
+        raise HTTPException(status_code=401, detail="Google token audience is not allowed")
+
+    issuer = str(id_info.get("iss", ""))
+    if issuer not in {"accounts.google.com", "https://accounts.google.com"}:
+        raise HTTPException(status_code=401, detail="Invalid Google token issuer")
+
+    email = normalize_email(id_info.get("email", ""))
+    if not email:
+        raise HTTPException(status_code=400, detail="Google account did not provide an email")
+    if not id_info.get("email_verified"):
+        raise HTTPException(status_code=400, detail="Google email is not verified")
+
+    now = datetime.utcnow().isoformat()
+    google_sub = str(id_info.get("sub") or "")
+    name = str(id_info.get("name") or email.split("@")[0])
+    picture = str(id_info.get("picture") or "")
+
+    account = await find_account_by_email(email)
+    if account:
+        role = normalize_role(account.get("role"))
+        collection = collection_for_role(role)
+        account_id = account.get("id")
+        if not account_id:
+            raise HTTPException(status_code=500, detail="Account record is invalid")
+
+        existing_sub = str(account.get("google_sub") or "")
+        if existing_sub and google_sub and existing_sub != google_sub:
+            raise HTTPException(status_code=403, detail="Google identity does not match this account")
+
+        updates: Dict[str, Any] = {
+            "email": email,
+            "email_normalized": email,
+            "updated_at": now,
+        }
+        if google_sub and not existing_sub:
+            updates["google_sub"] = google_sub
+        if picture and not account.get("image"):
+            updates["image"] = picture
+        if not account.get("auth_provider"):
+            updates["auth_provider"] = "google"
+        if not account.get("name"):
+            updates["name"] = name
+
+        if updates:
+            await collection.update_one({"id": account_id}, {"$set": updates})
+            invalidate_cached_auth_user(account_id)
+            account = await fetch_user_by_id(account_id, include_password=True)
+            if not account:
+                raise HTTPException(status_code=404, detail="Account not found")
+    else:
+        account_id = str(uuid.uuid4())
+        account = {
+            "id": account_id,
+            "name": name,
+            "email": email,
+            "email_normalized": email,
+            "password": hash_password(str(uuid.uuid4())),
+            "phone": None,
+            "role": "patient",
+            "created_at": now,
+            "updated_at": now,
+            "profile_complete": False,
+            "address": None,
+            "date_of_birth": None,
+            "blood_group": None,
+            "emergency_contact": None,
+            "allergies": [],
+            "chronic_conditions": [],
+            "notification_preferences": {"email": True, "push": True, "sms": True},
+            "auth_provider": "google",
+            "google_sub": google_sub or None,
+            "image": picture or None,
+        }
+        await users_collection.insert_one(account)
+        schedule_notification(
+            account_id,
+            "Welcome to Nirmaya Health!",
+            "Your account has been created with Google sign-in.",
+            "welcome",
+        )
+
+    role = normalize_role(account.get("role"))
+    token = create_token(account["id"], role)
+    user_response = {
+        "id": account["id"],
+        "name": account.get("name"),
+        "email": email,
+        "role": role,
+    }
+    if role == "doctor":
+        user_response["specialty"] = account.get("specialty")
+        user_response["department"] = account.get("department")
+
+    set_cached_auth_user(account)
     return {"token": token, "user": user_response}
 
 @app.get("/api/auth/me")

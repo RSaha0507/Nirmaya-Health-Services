@@ -1,5 +1,5 @@
 // src/MainApp.js - Complete Enhanced Nirmaya Health Services Application
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   HeartPulse, Stethoscope, Calendar, Users, Activity, FileText, MessageSquare,
   Settings, LogOut, LogIn, UserPlus, Home, Info, Phone, Menu, X, ChevronDown,
@@ -108,6 +108,101 @@ const buildRouteUrl = (page, params = {}) => {
   if (params.chatWith) search.set('chatWith', params.chatWith);
   const query = search.toString();
   return query ? `${path}?${query}` : path;
+};
+
+const GOOGLE_CLIENT_ID = (process.env.REACT_APP_GOOGLE_CLIENT_ID || '').trim();
+const GOOGLE_GSI_SRC = 'https://accounts.google.com/gsi/client';
+let googleIdentityScriptPromise = null;
+
+const loadGoogleIdentityScript = () => {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Google sign-in is only available in browser'));
+  }
+  if (window.google?.accounts?.id) {
+    return Promise.resolve();
+  }
+  if (googleIdentityScriptPromise) {
+    return googleIdentityScriptPromise;
+  }
+
+  googleIdentityScriptPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector(`script[src="${GOOGLE_GSI_SRC}"]`);
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(), { once: true });
+      existingScript.addEventListener('error', () => reject(new Error('Failed to load Google sign-in script')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = GOOGLE_GSI_SRC;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Google sign-in script'));
+    document.head.appendChild(script);
+  });
+
+  return googleIdentityScriptPromise;
+};
+
+const GoogleAuthButton = ({ onCredential, disabled = false, loadingText = 'Preparing Google sign-in...' }) => {
+  const containerRef = useRef(null);
+  const callbackRef = useRef(onCredential);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    callbackRef.current = onCredential;
+  }, [onCredential]);
+
+  useEffect(() => {
+    let active = true;
+
+    const setupGoogleButton = async () => {
+      if (!GOOGLE_CLIENT_ID || !containerRef.current) return;
+      try {
+        await loadGoogleIdentityScript();
+        if (!active || !window.google?.accounts?.id || !containerRef.current) return;
+
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: (response) => {
+            const credential = response?.credential;
+            if (credential && callbackRef.current) {
+              callbackRef.current(credential);
+            }
+          },
+        });
+
+        containerRef.current.innerHTML = '';
+        window.google.accounts.id.renderButton(containerRef.current, {
+          type: 'standard',
+          theme: 'outline',
+          size: 'large',
+          shape: 'pill',
+          text: 'continue_with',
+          width: 320,
+        });
+
+        setReady(true);
+      } catch (error) {
+        setReady(false);
+      }
+    };
+
+    setupGoogleButton();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (!GOOGLE_CLIENT_ID) return null;
+
+  return (
+    <div className={`flex flex-col items-center gap-2 ${disabled ? 'opacity-60 pointer-events-none' : ''}`}>
+      <div ref={containerRef} />
+      {!ready && <p className="text-xs text-gray-500">{loadingText}</p>}
+    </div>
+  );
 };
 
 // Toast Component
@@ -427,6 +522,7 @@ const LoginPage = ({ onLogin, navigateTo, showToast }) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -440,6 +536,21 @@ const LoginPage = ({ onLogin, navigateTo, showToast }) => {
     }
     setLoading(false);
   };
+
+  const handleGoogleAuth = useCallback(
+    async (idToken) => {
+      setGoogleLoading(true);
+      try {
+        const data = await api.post('/auth/google', { id_token: idToken });
+        setAccessToken(data.token);
+        onLogin(data.user);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+      setGoogleLoading(false);
+    },
+    [onLogin, showToast]
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 to-emerald-100 flex items-center justify-center py-20 px-4" data-testid="login-page">
@@ -469,10 +580,26 @@ const LoginPage = ({ onLogin, navigateTo, showToast }) => {
               </button>
             </div>
           </div>
-          <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-teal-500 to-emerald-500 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50" data-testid="submit-btn">
+          <button type="submit" disabled={loading || googleLoading} className="w-full bg-gradient-to-r from-teal-500 to-emerald-500 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50" data-testid="submit-btn">
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
+        {GOOGLE_CLIENT_ID && (
+          <div className="my-5">
+            <div className="flex items-center gap-3 text-xs text-gray-400 uppercase">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span>or continue with</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+            <div className="mt-4">
+              <GoogleAuthButton
+                onCredential={handleGoogleAuth}
+                disabled={loading || googleLoading}
+                loadingText={googleLoading ? 'Signing in with Google...' : 'Preparing Google sign-in...'}
+              />
+            </div>
+          </div>
+        )}
         <p className="mt-6 text-center text-gray-600">
           Don't have an account? <button onClick={() => navigateTo('register')} className="text-teal-600 font-semibold hover:underline" data-testid="register-link">Sign Up</button>
         </p>
@@ -490,12 +617,100 @@ const LoginPage = ({ onLogin, navigateTo, showToast }) => {
 const RegisterPage = ({ onLogin, navigateTo, showToast }) => {
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' });
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [emailValidation, setEmailValidation] = useState({
+    checking: false,
+    valid: true,
+    available: true,
+    message: '',
+  });
+  const emailValidationRunRef = useRef(0);
+
+  const validateRegistrationEmail = useCallback(async (emailValue) => {
+    const normalizedEmail = String(emailValue || '').trim();
+    const runId = emailValidationRunRef.current + 1;
+    emailValidationRunRef.current = runId;
+
+    if (!normalizedEmail) {
+      const emptyStatus = {
+        checking: false,
+        valid: false,
+        available: false,
+        message: 'Email is required',
+      };
+      setEmailValidation(emptyStatus);
+      return emptyStatus;
+    }
+
+    setEmailValidation({
+      checking: true,
+      valid: true,
+      available: true,
+      message: 'Checking email...',
+    });
+
+    try {
+      const status = await api.get(`/auth/validate-email?email=${encodeURIComponent(normalizedEmail)}`, {
+        force: true,
+        cacheTtlMs: 0,
+      });
+
+      if (emailValidationRunRef.current !== runId) return null;
+
+      const next = {
+        checking: false,
+        valid: Boolean(status?.valid),
+        available: Boolean(status?.available),
+        message: status?.message || '',
+      };
+      setEmailValidation(next);
+      return { ...status, ...next };
+    } catch (error) {
+      if (emailValidationRunRef.current !== runId) return null;
+      const failed = {
+        checking: false,
+        valid: false,
+        available: false,
+        message: 'Unable to validate email right now',
+      };
+      setEmailValidation(failed);
+      return failed;
+    }
+  }, []);
+
+  useEffect(() => {
+    const email = String(form.email || '').trim();
+    if (!email) {
+      setEmailValidation({
+        checking: false,
+        valid: true,
+        available: true,
+        message: '',
+      });
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      validateRegistrationEmail(email);
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [form.email, validateRegistrationEmail]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const emailStatus = await validateRegistrationEmail(form.email);
+    if (!emailStatus || !emailStatus.valid || !emailStatus.available) {
+      showToast(emailStatus?.message || 'Please enter a valid and available email', 'error');
+      return;
+    }
+
     setLoading(true);
     try {
-      const data = await api.post('/auth/register', form);
+      const data = await api.post('/auth/register', {
+        ...form,
+        email: emailStatus.normalized_email || form.email,
+      });
       setAccessToken(data.token);
       onLogin(data.user);
     } catch (err) {
@@ -503,6 +718,21 @@ const RegisterPage = ({ onLogin, navigateTo, showToast }) => {
     }
     setLoading(false);
   };
+
+  const handleGoogleAuth = useCallback(
+    async (idToken) => {
+      setGoogleLoading(true);
+      try {
+        const data = await api.post('/auth/google', { id_token: idToken });
+        setAccessToken(data.token);
+        onLogin(data.user);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+      setGoogleLoading(false);
+    },
+    [onLogin, showToast]
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 to-emerald-100 flex items-center justify-center py-20 px-4" data-testid="register-page">
@@ -528,6 +758,11 @@ const RegisterPage = ({ onLogin, navigateTo, showToast }) => {
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
               <input type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500" placeholder="your@email.com" required data-testid="email-input" />
             </div>
+            {form.email.trim() && (
+              <p className={`mt-2 text-xs ${emailValidation.checking ? 'text-gray-500' : (!emailValidation.valid || !emailValidation.available ? 'text-red-500' : 'text-green-600')}`}>
+                {emailValidation.checking ? 'Checking email...' : emailValidation.message}
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
@@ -543,10 +778,26 @@ const RegisterPage = ({ onLogin, navigateTo, showToast }) => {
               <input type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500" placeholder="••••••••" required minLength={6} data-testid="password-input" />
             </div>
           </div>
-          <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-teal-500 to-emerald-500 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50" data-testid="submit-btn">
-            {loading ? 'Creating account...' : 'Create Account'}
+          <button type="submit" disabled={loading || googleLoading || emailValidation.checking} className="w-full bg-gradient-to-r from-teal-500 to-emerald-500 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50" data-testid="submit-btn">
+            {loading ? 'Creating account...' : emailValidation.checking ? 'Validating email...' : 'Create Account'}
           </button>
         </form>
+        {GOOGLE_CLIENT_ID && (
+          <div className="my-5">
+            <div className="flex items-center gap-3 text-xs text-gray-400 uppercase">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span>or continue with</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+            <div className="mt-4">
+              <GoogleAuthButton
+                onCredential={handleGoogleAuth}
+                disabled={loading || googleLoading}
+                loadingText={googleLoading ? 'Signing up with Google...' : 'Preparing Google sign-in...'}
+              />
+            </div>
+          </div>
+        )}
         <p className="mt-6 text-center text-gray-600">
           Already have an account? <button onClick={() => navigateTo('login')} className="text-teal-600 font-semibold hover:underline">Sign In</button>
         </p>
