@@ -2170,6 +2170,10 @@ const App = () => {
 
     window.addEventListener('popstate', syncRouteFromLocation);
     syncRouteFromLocation();
+    api.get('/health', { force: true, cacheTtlMs: 30000 }).catch(() => {});
+    const keepAlive = window.setInterval(() => {
+      api.get('/health', { force: true, cacheTtlMs: 0 }).catch(() => {});
+    }, 4 * 60 * 1000);
 
     const bootstrapAuth = async () => {
       const token = getAccessToken();
@@ -2200,6 +2204,7 @@ const App = () => {
 
     return () => {
       window.removeEventListener('popstate', syncRouteFromLocation);
+      window.clearInterval(keepAlive);
     };
   }, []);
 
