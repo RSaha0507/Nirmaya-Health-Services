@@ -1,6 +1,7 @@
 # Nirmaya Health Services - Premium Enhanced Backend v3.0
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -17,6 +18,7 @@ import random
 import string
 import time
 import re
+import copy
 from motor.motor_asyncio import AsyncIOMotorClient
 import httpx
 import stripe
@@ -90,6 +92,7 @@ ALLOW_BCRYPT_REHASH_DOWNGRADE = parse_bool_env("ALLOW_BCRYPT_REHASH_DOWNGRADE", 
 TRUSTED_ORIGINS = set(CORS_ALLOWED_ORIGINS)
 BCRYPT_ROUNDS = max(4, parse_int_env("BCRYPT_ROUNDS", 10))
 AUTH_USER_CACHE_TTL_SECONDS = max(0, parse_int_env("AUTH_USER_CACHE_TTL_SECONDS", 120))
+PUBLIC_ENDPOINT_CACHE_TTL_SECONDS = max(0, parse_int_env("PUBLIC_ENDPOINT_CACHE_TTL_SECONDS", 90))
 MONGO_MAX_POOL_SIZE = max(20, parse_int_env("MONGO_MAX_POOL_SIZE", 120))
 REPORT_FILE_ALLOWED_HOSTS = {
     host for host in (normalize_host_value(item) for item in parse_csv_env("REPORT_FILE_ALLOWED_HOSTS")) if host
@@ -108,6 +111,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=600)
 
 # MongoDB Connection
 client = AsyncIOMotorClient(
@@ -143,6 +147,7 @@ departments_collection = db.departments
 ambulances_collection = db.ambulances
 payment_transactions_collection = db.payment_transactions
 auth_user_cache: Dict[str, Dict[str, Any]] = {}
+public_endpoint_cache: Dict[str, Dict[str, Any]] = {}
 
 security = HTTPBearer()
 
@@ -167,8 +172,15 @@ async def startup_optimizations():
             doctors_collection.create_index("id"),
             doctors_collection.create_index("email"),
             doctors_collection.create_index("email_normalized"),
+            doctors_collection.create_index([("department", 1), ("name", 1)]),
+            doctors_collection.create_index("name"),
             appointments_collection.create_index([("patient_id", 1), ("created_at", -1)]),
             appointments_collection.create_index([("doctor_id", 1), ("created_at", -1)]),
+            equipment_collection.create_index([("category", 1), ("department", 1)]),
+            health_packages_collection.create_index("category"),
+            lab_tests_collection.create_index("category"),
+            beds_collection.create_index([("ward", 1), ("status", 1)]),
+            departments_collection.create_index("slug"),
             reports_collection.create_index([("patient_id", 1), ("created_at", -1)]),
             notifications_collection.create_index([("user_id", 1), ("created_at", -1)]),
             messages_collection.create_index([("sender_id", 1), ("receiver_id", 1), ("created_at", -1)]),
@@ -473,6 +485,55 @@ def invalidate_cached_auth_user(user_id: Optional[str]):
     if not user_id:
         return
     auth_user_cache.pop(user_id, None)
+
+def build_public_cache_key(namespace: str, **params) -> str:
+    parts = [namespace]
+    for key in sorted(params):
+        parts.append(f"{key}={params[key] or ''}")
+    return "|".join(parts)
+
+def get_cached_public_payload(cache_key: str):
+    if not PUBLIC_ENDPOINT_CACHE_TTL_SECONDS:
+        return None
+    entry = public_endpoint_cache.get(cache_key)
+    if not entry:
+        return None
+    if entry.get("expires_at", 0) <= time.monotonic():
+        public_endpoint_cache.pop(cache_key, None)
+        return None
+    return copy.deepcopy(entry.get("payload"))
+
+def set_cached_public_payload(cache_key: str, payload: Any):
+    if not PUBLIC_ENDPOINT_CACHE_TTL_SECONDS:
+        return
+    public_endpoint_cache[cache_key] = {
+        "expires_at": time.monotonic() + PUBLIC_ENDPOINT_CACHE_TTL_SECONDS,
+        "payload": copy.deepcopy(payload),
+    }
+
+def invalidate_public_cache(prefixes: Optional[List[str]] = None):
+    if not prefixes:
+        public_endpoint_cache.clear()
+        return
+    keys = list(public_endpoint_cache.keys())
+    for key in keys:
+        if any(key.startswith(prefix) for prefix in prefixes):
+            public_endpoint_cache.pop(key, None)
+
+async def get_or_set_public_payload(cache_key: str, loader):
+    cached = get_cached_public_payload(cache_key)
+    if cached is not None:
+        return cached
+    payload = await loader()
+    set_cached_public_payload(cache_key, payload)
+    return payload
+
+def set_public_cache_headers(response: Response, ttl_seconds: Optional[int] = None):
+    ttl = PUBLIC_ENDPOINT_CACHE_TTL_SECONDS if ttl_seconds is None else max(0, ttl_seconds)
+    if ttl <= 0:
+        response.headers["Cache-Control"] = "no-store"
+        return
+    response.headers["Cache-Control"] = f"public, max-age={ttl}, stale-while-revalidate={ttl * 4}"
 
 async def fetch_user_by_id(user_id: str, include_password: bool = False) -> Optional[dict]:
     projection = None if include_password else {"password": 0}
@@ -818,37 +879,54 @@ async def health_check():
 
 # ==================== DEPARTMENTS ====================
 @app.get("/api/departments")
-async def get_departments():
-    departments = await departments_collection.find({}, {"_id": 0}).to_list(50)
-    if departments:
-        return departments
+async def get_departments(response: Response):
+    set_public_cache_headers(response)
+    cache_key = build_public_cache_key("departments")
 
-    # Fallback for partially seeded databases: infer departments from doctors.
-    doctor_departments = await doctors_collection.distinct("department")
-    inferred = [default_department_from_name(name) for name in doctor_departments if name]
-    inferred.sort(key=lambda item: item["name"])
-    return inferred
+    async def _load_departments():
+        departments = await departments_collection.find({}, {"_id": 0}).sort("name", 1).to_list(50)
+        if departments:
+            return departments
+
+        # Fallback for partially seeded databases: infer departments from doctors.
+        doctor_departments = await doctors_collection.distinct("department")
+        inferred = [default_department_from_name(name) for name in doctor_departments if name]
+        inferred.sort(key=lambda item: item["name"])
+        return inferred
+
+    return await get_or_set_public_payload(cache_key, _load_departments)
 
 @app.get("/api/departments/{slug}")
-async def get_department(slug: str):
-    department = await departments_collection.find_one({"slug": slug}, {"_id": 0})
-    if not department:
-        doctor_departments = await doctors_collection.distinct("department")
-        matched = next((name for name in doctor_departments if slugify(name) == slug), None)
-        if not matched:
-            raise HTTPException(status_code=404, detail="Department not found")
-        department = default_department_from_name(matched)
-        department["slug"] = slug
-    
-    # Get doctors for this department
-    doctors = await doctors_collection.find({"department": department["name"]}, {"_id": 0, "password": 0}).to_list(50)
-    department["doctors"] = doctors
-    
-    # Get health packages for this department
-    packages = await health_packages_collection.find({"department": department["name"]}, {"_id": 0}).to_list(20)
-    department["health_packages"] = packages
-    
-    return department
+async def get_department(slug: str, response: Response):
+    set_public_cache_headers(response)
+    cache_key = build_public_cache_key("department", slug=slug)
+
+    async def _load_department():
+        department = await departments_collection.find_one({"slug": slug}, {"_id": 0})
+        if not department:
+            doctor_departments = await doctors_collection.distinct("department")
+            matched = next((name for name in doctor_departments if slugify(name) == slug), None)
+            if not matched:
+                raise HTTPException(status_code=404, detail="Department not found")
+            department = default_department_from_name(matched)
+            department["slug"] = slug
+
+        # Get doctors and packages for this department.
+        doctors = await doctors_collection.find(
+            {"department": department["name"]},
+            {"_id": 0, "password": 0},
+        ).sort("name", 1).to_list(50)
+        packages = await health_packages_collection.find(
+            {"department": department["name"]},
+            {"_id": 0},
+        ).to_list(20)
+
+        payload = dict(department)
+        payload["doctors"] = doctors
+        payload["health_packages"] = packages
+        return payload
+
+    return await get_or_set_public_payload(cache_key, _load_department)
 
 # ==================== AMBULANCES ====================
 @app.get("/api/ambulances")
@@ -1117,10 +1195,18 @@ async def mark_all_notifications_read(current_user: dict = Depends(get_current_u
 
 # ==================== DOCTORS ROUTES ====================
 @app.get("/api/doctors")
-async def get_doctors(department: Optional[str] = None):
-    query = {} if not department else {"department": department}
-    doctors = await doctors_collection.find(query).sort("name", 1).to_list(1000)
-    return [{k: v for k, v in d.items() if k not in ["password", "_id"]} for d in doctors]
+async def get_doctors(response: Response, department: Optional[str] = None):
+    set_public_cache_headers(response)
+    cache_key = build_public_cache_key("doctors", department=department or "")
+
+    async def _load_doctors():
+        query = {} if not department else {"department": department}
+        return await doctors_collection.find(
+            query,
+            {"_id": 0, "password": 0},
+        ).sort("name", 1).to_list(1000)
+
+    return await get_or_set_public_payload(cache_key, _load_doctors)
 
 @app.get("/api/doctors/{doctor_id}")
 async def get_doctor(doctor_id: str):
@@ -1175,6 +1261,7 @@ async def create_doctor(doctor: DoctorCreate, current_user: dict = Depends(get_c
         "available_for_video": True
     }
     await doctors_collection.insert_one(doctor_doc)
+    invalidate_public_cache(["doctors|", "departments|", "department|"])
     return {k: v for k, v in doctor_doc.items() if k not in ["password", "_id"]}
 
 @app.put("/api/doctors/{doctor_id}")
@@ -1185,6 +1272,7 @@ async def update_doctor(doctor_id: str, update: DoctorUpdate, current_user: dict
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     if update_data:
         await doctors_collection.update_one({"id": doctor_id}, {"$set": update_data})
+        invalidate_public_cache(["doctors|", "departments|", "department|"])
     
     updated = await doctors_collection.find_one({"id": doctor_id})
     return {k: v for k, v in updated.items() if k not in ["password", "_id"]}
@@ -1194,6 +1282,7 @@ async def delete_doctor(doctor_id: str, current_user: dict = Depends(get_current
     if not has_any_role(current_user, ["admin", "hospital_administrator"]):
         raise HTTPException(status_code=403, detail="Admin access required")
     await doctors_collection.delete_one({"id": doctor_id})
+    invalidate_public_cache(["doctors|", "departments|", "department|"])
     return {"message": "Doctor deleted successfully"}
 
 @app.post("/api/doctors/{doctor_id}/review")
@@ -1559,10 +1648,15 @@ async def delete_shift(shift_id: str, current_user: dict = Depends(get_current_u
 
 # ==================== HEALTH PACKAGES ====================
 @app.get("/api/health-packages")
-async def get_health_packages(category: Optional[str] = None):
-    query = {} if not category else {"category": category}
-    packages = await health_packages_collection.find(query).to_list(50)
-    return [serialize_doc(p) for p in packages]
+async def get_health_packages(response: Response, category: Optional[str] = None):
+    set_public_cache_headers(response)
+    cache_key = build_public_cache_key("health-packages", category=category or "")
+
+    async def _load_packages():
+        query = {} if not category else {"category": category}
+        return await health_packages_collection.find(query, {"_id": 0}).to_list(50)
+
+    return await get_or_set_public_payload(cache_key, _load_packages)
 
 @app.get("/api/health-packages/{package_id}")
 async def get_health_package(package_id: str):
@@ -1583,6 +1677,7 @@ async def create_health_package(package: HealthPackageCreate, current_user: dict
         "created_at": datetime.utcnow().isoformat()
     }
     await health_packages_collection.insert_one(package_doc)
+    invalidate_public_cache(["health-packages|", "department|"])
     return serialize_doc(package_doc)
 
 @app.post("/api/health-packages/{package_id}/book")
@@ -1737,10 +1832,16 @@ async def get_health_timeline(patient_id: str, current_user: dict = Depends(get_
 
 # ==================== LAB TESTS ====================
 @app.get("/api/lab-tests")
-async def get_lab_tests(category: Optional[str] = None):
-    query = {} if not category else {"category": category}
-    tests = await lab_tests_collection.find(query).to_list(100)
-    return [enrich_lab_test(serialize_doc(t)) for t in tests]
+async def get_lab_tests(response: Response, category: Optional[str] = None):
+    set_public_cache_headers(response)
+    cache_key = build_public_cache_key("lab-tests", category=category or "")
+
+    async def _load_tests():
+        query = {} if not category else {"category": category}
+        tests = await lab_tests_collection.find(query, {"_id": 0}).to_list(100)
+        return [enrich_lab_test(t) for t in tests]
+
+    return await get_or_set_public_payload(cache_key, _load_tests)
 
 @app.post("/api/lab-tests")
 async def create_lab_test(test: LabTestCreate, current_user: dict = Depends(get_current_user)):
@@ -1754,6 +1855,7 @@ async def create_lab_test(test: LabTestCreate, current_user: dict = Depends(get_
         "created_at": datetime.utcnow().isoformat()
     }
     await lab_tests_collection.insert_one(test_doc)
+    invalidate_public_cache(["lab-tests|"])
     return serialize_doc(test_doc)
 
 @app.post("/api/lab-tests/book")
@@ -1815,32 +1917,40 @@ async def upload_lab_result(booking_id: str, result_url: str = Form(...), notes:
 
 # ==================== BED MANAGEMENT ====================
 @app.get("/api/beds")
-async def get_beds(ward: Optional[str] = None, available_only: bool = False):
-    query = {}
-    if ward:
-        query["ward"] = ward
-    if available_only:
-        query["status"] = "available"
-    
-    beds = await beds_collection.find(query).to_list(200)
-    return [serialize_doc(b) for b in beds]
+async def get_beds(response: Response, ward: Optional[str] = None, available_only: bool = False):
+    set_public_cache_headers(response, ttl_seconds=45)
+    cache_key = build_public_cache_key("beds", ward=ward or "", available_only=str(available_only).lower())
+
+    async def _load_beds():
+        query = {}
+        if ward:
+            query["ward"] = ward
+        if available_only:
+            query["status"] = "available"
+        return await beds_collection.find(query, {"_id": 0}).to_list(200)
+
+    return await get_or_set_public_payload(cache_key, _load_beds)
 
 @app.get("/api/beds/availability")
-async def get_bed_availability():
-    beds = await beds_collection.find().to_list(500)
-    
-    wards = {}
-    for bed in beds:
-        ward = bed.get("ward", "Unknown")
-        if ward not in wards:
-            wards[ward] = {"total": 0, "available": 0, "occupied": 0}
-        wards[ward]["total"] += 1
-        if bed.get("status") == "available":
-            wards[ward]["available"] += 1
-        else:
-            wards[ward]["occupied"] += 1
-    
-    return wards
+async def get_bed_availability(response: Response):
+    set_public_cache_headers(response, ttl_seconds=45)
+    cache_key = build_public_cache_key("beds-availability")
+
+    async def _load_availability():
+        beds = await beds_collection.find({}, {"_id": 0, "ward": 1, "status": 1}).to_list(500)
+        wards = {}
+        for bed in beds:
+            ward = bed.get("ward", "Unknown")
+            if ward not in wards:
+                wards[ward] = {"total": 0, "available": 0, "occupied": 0}
+            wards[ward]["total"] += 1
+            if bed.get("status") == "available":
+                wards[ward]["available"] += 1
+            else:
+                wards[ward]["occupied"] += 1
+        return wards
+
+    return await get_or_set_public_payload(cache_key, _load_availability)
 
 @app.post("/api/beds")
 async def create_bed(bed: BedCreate, current_user: dict = Depends(get_current_user)):
@@ -1857,6 +1967,7 @@ async def create_bed(bed: BedCreate, current_user: dict = Depends(get_current_us
         "created_at": datetime.utcnow().isoformat()
     }
     await beds_collection.insert_one(bed_doc)
+    invalidate_public_cache(["beds|", "beds-availability"])
     return serialize_doc(bed_doc)
 
 @app.post("/api/beds/{bed_id}/admit")
@@ -1878,6 +1989,7 @@ async def admit_patient(bed_id: str, patient_id: str = Form(...), patient_name: 
             "admitted_by": current_user["id"]
         }
     })
+    invalidate_public_cache(["beds|", "beds-availability"])
     
     await create_notification(patient_id, "Bed Admission",
         f"You have been admitted to {bed['ward']} - Bed {bed['bed_number']}",
@@ -1903,6 +2015,7 @@ async def discharge_patient(bed_id: str, current_user: dict = Depends(get_curren
             "admission_date": None
         }
     })
+    invalidate_public_cache(["beds|", "beds-availability"])
     
     if patient:
         await create_notification(patient["id"], "Discharge Complete",
@@ -2030,14 +2143,19 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 
 # ==================== EQUIPMENT ====================
 @app.get("/api/equipment")
-async def get_equipment(category: Optional[str] = None, department: Optional[str] = None):
-    query = {}
-    if category:
-        query["category"] = category
-    if department:
-        query["department"] = department
-    equipment = await equipment_collection.find(query).to_list(100)
-    return [serialize_doc(e) for e in equipment]
+async def get_equipment(response: Response, category: Optional[str] = None, department: Optional[str] = None):
+    set_public_cache_headers(response)
+    cache_key = build_public_cache_key("equipment", category=category or "", department=department or "")
+
+    async def _load_equipment():
+        query = {}
+        if category:
+            query["category"] = category
+        if department:
+            query["department"] = department
+        return await equipment_collection.find(query, {"_id": 0}).to_list(100)
+
+    return await get_or_set_public_payload(cache_key, _load_equipment)
 
 @app.post("/api/equipment")
 async def add_equipment(equipment: EquipmentCreate, current_user: dict = Depends(get_current_user)):
@@ -2051,6 +2169,7 @@ async def add_equipment(equipment: EquipmentCreate, current_user: dict = Depends
         "created_at": datetime.utcnow().isoformat()
     }
     await equipment_collection.insert_one(equipment_doc)
+    invalidate_public_cache(["equipment|"])
     return serialize_doc(equipment_doc)
 
 # ==================== REPORTS ====================
@@ -2475,6 +2594,16 @@ async def seed_data(current_user: dict = Depends(get_current_user)):
         await inventory_collection.insert_many(inventory_data)
     
     sync_summary = await sync_seed_catalog()
+    invalidate_public_cache([
+        "departments|",
+        "department|",
+        "doctors|",
+        "health-packages|",
+        "lab-tests|",
+        "beds|",
+        "beds-availability",
+        "equipment|",
+    ])
 
     return {
         "message": "Data seeded successfully",

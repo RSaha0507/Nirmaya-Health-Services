@@ -8,9 +8,19 @@ export const API_URL = NORMALIZED_BACKEND_URL
 const ACCESS_TOKEN_KEY = 'nirmaya_session_token';
 const LEGACY_TOKEN_KEY = 'token';
 const USER_PROFILE_KEY = 'nirmaya_user_profile';
+const PERSISTED_CACHE_PREFIX = 'nirmaya_api_cache:';
 const DEFAULT_GET_CACHE_TTL_MS = 15000;
 const responseCache = new Map();
 const inflightGetRequests = new Map();
+const PERSISTED_ENDPOINT_RULES = [
+  { pattern: /^\/doctors(\?|$)/, ttlMs: 5 * 60 * 1000 },
+  { pattern: /^\/equipment(\?|$)/, ttlMs: 5 * 60 * 1000 },
+  { pattern: /^\/departments(\?|$)/, ttlMs: 5 * 60 * 1000 },
+  { pattern: /^\/health-packages(\?|$)/, ttlMs: 5 * 60 * 1000 },
+  { pattern: /^\/lab-tests(\?|$)/, ttlMs: 3 * 60 * 1000 },
+  { pattern: /^\/beds(\?|$)/, ttlMs: 60 * 1000 },
+  { pattern: /^\/beds\/availability(\?|$)/, ttlMs: 60 * 1000 },
+];
 
 const safeReadStorage = (storage, key) => {
   try {
@@ -82,9 +92,56 @@ export const clearAccessToken = () => {
 
 const isFormData = (value) => typeof FormData !== 'undefined' && value instanceof FormData;
 const getCacheKey = (endpoint) => `GET:${endpoint}`;
+const getPersistedCacheKey = (endpoint) => `${PERSISTED_CACHE_PREFIX}${endpoint}`;
+
+const getPersistedCacheRule = (endpoint) =>
+  PERSISTED_ENDPOINT_RULES.find((rule) => rule.pattern.test(endpoint));
+
+const readPersistedCache = (endpoint) => {
+  if (!isBrowser()) return null;
+  const raw = safeReadStorage(window.sessionStorage, getPersistedCacheKey(endpoint));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || parsed.expiresAt <= Date.now()) {
+      safeRemoveStorage(window.sessionStorage, getPersistedCacheKey(endpoint));
+      return null;
+    }
+    return parsed.data;
+  } catch (error) {
+    safeRemoveStorage(window.sessionStorage, getPersistedCacheKey(endpoint));
+    return null;
+  }
+};
+
+const writePersistedCache = (endpoint, data, ttlMs) => {
+  if (!isBrowser() || !ttlMs || ttlMs <= 0) return;
+  safeWriteStorage(
+    window.sessionStorage,
+    getPersistedCacheKey(endpoint),
+    JSON.stringify({
+      expiresAt: Date.now() + ttlMs,
+      data,
+    })
+  );
+};
+
+const clearPersistedApiCache = (endpointPrefix = '') => {
+  if (!isBrowser()) return;
+  const keys = [];
+  for (let i = 0; i < window.sessionStorage.length; i += 1) {
+    const key = window.sessionStorage.key(i);
+    if (!key || !key.startsWith(PERSISTED_CACHE_PREFIX)) continue;
+    if (!endpointPrefix || key.startsWith(`${PERSISTED_CACHE_PREFIX}${endpointPrefix}`)) {
+      keys.push(key);
+    }
+  }
+  keys.forEach((key) => safeRemoveStorage(window.sessionStorage, key));
+};
 
 export const clearApiCache = () => {
   responseCache.clear();
+  clearPersistedApiCache();
 };
 
 export const invalidateApiCache = (endpointPrefix = '') => {
@@ -98,6 +155,7 @@ export const invalidateApiCache = (endpointPrefix = '') => {
       responseCache.delete(key);
     }
   }
+  clearPersistedApiCache(endpointPrefix);
 };
 
 export const setCachedUserProfile = (profile) => {
@@ -155,6 +213,7 @@ export const api = {
   get(endpoint, options = {}) {
     const { cacheTtlMs = DEFAULT_GET_CACHE_TTL_MS, force = false } = options;
     const cacheKey = getCacheKey(endpoint);
+    const persistedRule = getPersistedCacheRule(endpoint);
 
     if (!force && cacheTtlMs > 0) {
       const cached = responseCache.get(cacheKey);
@@ -163,6 +222,19 @@ export const api = {
       }
       if (cached) {
         responseCache.delete(cacheKey);
+      }
+    }
+
+    if (!force && persistedRule) {
+      const persisted = readPersistedCache(endpoint);
+      if (persisted !== null && persisted !== undefined) {
+        if (cacheTtlMs > 0) {
+          responseCache.set(cacheKey, {
+            data: persisted,
+            expiresAt: Date.now() + Math.min(cacheTtlMs, persistedRule.ttlMs),
+          });
+        }
+        return Promise.resolve(persisted);
       }
     }
 
@@ -178,6 +250,9 @@ export const api = {
             data,
             expiresAt: Date.now() + cacheTtlMs,
           });
+        }
+        if (persistedRule) {
+          writePersistedCache(endpoint, data, persistedRule.ttlMs);
         }
         return data;
       })

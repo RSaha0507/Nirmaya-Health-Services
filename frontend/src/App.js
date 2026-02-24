@@ -49,7 +49,7 @@ const Navbar = ({ user, onLogout, navigateTo, currentPage }) => {
       <div className="container mx-auto px-4 py-3 flex justify-between items-center">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigateTo('home')}>
           <div className="bg-gradient-to-r from-teal-500 to-emerald-500 p-2 rounded-lg">
-            <img src="/logo.png" alt="Logo" className="w-7 h-7 object-contain" />
+            <img src="/logo192.png" alt="Logo" className="w-7 h-7 object-contain" />
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-800">Nirmaya Health</h1>

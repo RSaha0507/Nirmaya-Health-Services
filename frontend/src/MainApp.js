@@ -2174,6 +2174,18 @@ const App = () => {
     const keepAlive = window.setInterval(() => {
       api.get('/health', { force: true, cacheTtlMs: 0 }).catch(() => {});
     }, 4 * 60 * 1000);
+    const prefetchCatalogData = () => {
+      api.get('/doctors').catch(() => {});
+      api.get('/equipment').catch(() => {});
+      api.get('/departments').catch(() => {});
+      api.get('/health-packages').catch(() => {});
+    };
+    let prefetchHandle;
+    if ('requestIdleCallback' in window) {
+      prefetchHandle = window.requestIdleCallback(prefetchCatalogData, { timeout: 4000 });
+    } else {
+      prefetchHandle = window.setTimeout(prefetchCatalogData, 1500);
+    }
 
     const bootstrapAuth = async () => {
       const token = getAccessToken();
@@ -2205,6 +2217,11 @@ const App = () => {
     return () => {
       window.removeEventListener('popstate', syncRouteFromLocation);
       window.clearInterval(keepAlive);
+      if ('cancelIdleCallback' in window && 'requestIdleCallback' in window) {
+        window.cancelIdleCallback(prefetchHandle);
+      } else {
+        window.clearTimeout(prefetchHandle);
+      }
     };
   }, []);
 
