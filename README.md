@@ -1,7 +1,11 @@
 # Nirmaya Health Services
 
 <p align="center">
-  Smart hospital platform with patient, doctor, operations, and admin workflows.
+  Care-centered digital hospital platform for patients, doctors, operations teams, and administrators.
+</p>
+
+<p align="center">
+  <img width="1200" alt="Nirmaya Platform Preview" src="https://github.com/user-attachments/assets/5c265878-6bdc-4e92-b738-4d54cdabdfc9" />
 </p>
 
 <p align="center">
@@ -20,6 +24,10 @@
   <a href="https://github.com/RSaha0507/Nirmaya-Health-Services/issues">Issues</a>
 </p>
 
+<p align="center">
+  <em>Built to make healthcare workflows feel calm, reliable, and human at scale.</em>
+</p>
+
 ---
 
 ## Table Of Contents
@@ -36,6 +44,11 @@
 - [Build, Deploy, Verify](#build-deploy-verify)
 - [Testing And Health Checks](#testing-and-health-checks)
 - [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
+- [Acknowledgements](#acknowledgements)
+- [Closing Note](#closing-note)
 
 ---
 
@@ -47,6 +60,11 @@ Nirmaya Health Services is a full-stack healthcare operations platform that conn
 - administrators (analytics, users, governance).
 
 The platform is built as a React frontend and FastAPI backend with MongoDB Atlas, Stripe integration, and authenticated WebSocket messaging.
+
+### Why this project feels different
+- It is not just a booking app; it models day-to-day hospital operations.
+- It balances product experience and engineering depth in one codebase.
+- It is built with practical production concerns in mind: security, latency, and observability-ready workflows.
 
 ---
 
@@ -404,12 +422,62 @@ npm --prefix frontend run build
 ---
 
 ## Roadmap
-- Expand automated integration tests for authz and CORS.
+- Expand automated integration tests for authz and CORS regression.
 - Add distributed cache (Redis) for multi-instance backend scaling.
 - Introduce background workers for non-critical async workflows.
 - Add richer observability dashboards (p95 latency, cache hit ratios, queue depths).
+- Introduce route-level bundle splitting to improve first-load mobile performance.
 
 ---
 
-Built for real-world healthcare workflow orchestration: secure by default, fast by design, and structured for production operations.
+## Contributing
+Contributions are welcome, especially around reliability, accessibility, and clinical workflow improvements.
 
+### How to contribute
+1. Fork the repository.
+2. Create a feature branch (`feat/<topic>` or `fix/<topic>`).
+3. Keep commits focused and testable.
+4. Open a PR with:
+   - what changed,
+   - why it changed,
+   - how it was tested.
+
+### Recommended contribution areas
+- API test coverage for authz/security-sensitive routes.
+- Performance profiling and database index tuning.
+- UX improvements for patient and operations journeys.
+- Error handling and observability instrumentation.
+
+---
+
+## License
+This repository currently does not include a standalone `LICENSE` file.
+
+Until a license file is added, treat usage as all-rights-reserved by default.  
+If you want to reuse substantial parts of this project, please reach out first.
+
+---
+
+## Contact
+For collaboration, project discussions, or architecture deep-dives:
+- GitHub: [RSaha0507](https://github.com/RSaha0507)
+- Issues: [Open an issue](https://github.com/RSaha0507/Nirmaya-Health-Services/issues)
+- Live app: [nirmaya-health-services.netlify.app](https://nirmaya-health-services.netlify.app)
+
+---
+
+## Acknowledgements
+- Frontline healthcare teams whose workflow pain points inspired the product direction.
+- Open-source maintainers behind FastAPI, React, MongoDB ecosystem tooling, and Stripe SDKs.
+- Everyone who tested edge cases and gave candid feedback during hardening iterations.
+
+---
+
+## Closing Note
+Nirmaya Health Services is built with one clear principle: technology should reduce stress in healthcare, not add to it.
+
+If this project resonates with you, feel free to open an issue, suggest an enhancement, or collaborate on the next iteration.
+
+---
+
+Built for real-world healthcare workflow orchestration: secure by default, fast by design, and grounded in practical care operations.
